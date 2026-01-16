@@ -1,234 +1,161 @@
-# Sacrilege Engine - API Reference
+# API Reference
 
-## Base URL
+## Analysis Orchestrator
 
+The main entry point for demo analysis.
+
+```python
+from src.analysis_orchestrator import AnalysisOrchestrator
+
+orchestrator = AnalysisOrchestrator()
+result = orchestrator.analyze(demo_path, player_name)
 ```
-Production: https://api.sacrilege.engine/v1
-Development: http://localhost:8000/v1
+
+### Methods
+
+#### `analyze(demo_path: Path | str, player_name: str) -> AnalysisResult`
+
+Analyzes a demo file for a specific player.
+
+**Parameters:**
+- `demo_path`: Path to the .dem file
+- `player_name`: Name of the player to analyze
+
+**Returns:** `AnalysisResult` with feedback and statistics
+
+---
+
+## Demo Parser
+
+```python
+from src.parser.demo_parser import DemoParser
+
+parser = DemoParser()
+result = parser.parse(demo_path)
+```
+
+### ParseResult
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | bool | Whether parsing succeeded |
+| `data` | DemoData | Parsed demo data |
+| `error` | str | Error message if failed |
+
+### DemoData
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `header` | DemoHeader | Map name, duration, etc. |
+| `players` | dict[str, PlayerInfo] | Player information by steam ID |
+| `rounds` | list[Round] | Round data with kills, events |
+
+---
+
+## Radar Replayer
+
+```python
+from radar.radar_replayer import RadarReplayer
+
+replayer = RadarReplayer(width=1400, height=900)
+replayer.load_demo(Path("demo.dem"))
+replayer.run()  # Opens interactive window
+```
+
+### MapConfig
+
+```python
+from radar.radar_replayer import MAP_CONFIGS
+
+mirage = MAP_CONFIGS['de_mirage']
+px, py = mirage.world_to_radar(world_x, world_y, 1024)
 ```
 
 ---
 
-## Endpoints
+## Visualization
 
-### Demo Upload
+### Heatmap Generator
 
-**POST** `/demos/upload`
+```python
+from src.visualization.heatmap import HeatmapGenerator
 
-Upload a CS2 demo file for analysis.
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer <token>" \
-  -F "file=@match.dem" \
-  https://api.sacrilege.engine/v1/demos/upload
+gen = HeatmapGenerator(demo_data)
+kills = gen.generate('kills', player_id='76561198...')
+deaths = gen.generate('deaths', player_id='76561198...')
 ```
 
-**Response**
-```json
-{
-  "demo_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "processing",
-  "estimated_time_seconds": 90
-}
+### Timeline Generator
+
+```python
+from src.visualization.timeline import TimelineGenerator
+
+gen = TimelineGenerator(demo_data)
+timeline = gen.generate()
 ```
 
 ---
 
-### Demo Status
+## Intelligence Modules
 
-**GET** `/demos/{demo_id}/status`
+All modules inherit from `IntelligenceModule`:
 
-Check processing status.
-
-```json
-{
-  "demo_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "processing",
-  "progress_percent": 47,
-  "current_stage": "analyzing_trade_discipline",
-  "stages_complete": ["validation", "parsing", "visibility"],
-  "stages_pending": ["feedback_generation"]
-}
+```python
+class IntelligenceModule(ABC):
+    @abstractmethod
+    def analyze(self, demo_data, player_id) -> list[Feedback]:
+        pass
 ```
+
+### Available Modules
+
+| Module | Import |
+|--------|--------|
+| Peek IQ | `from src.intelligence.peek_iq import PeekIQModule` |
+| Trade Discipline | `from src.intelligence.trade_discipline import TradeDisciplineModule` |
+| Utility Intelligence | `from src.intelligence.utility_intelligence import UtilityIntelligenceModule` |
+| Crosshair Discipline | `from src.intelligence.crosshair_discipline import CrosshairDisciplineModule` |
+| Rotation IQ | `from src.intelligence.rotation_iq import RotationIQModule` |
+| Tilt Detector | `from src.intelligence.tilt_detector import TiltDetectorModule` |
+| Cheat Patterns | `from src.intelligence.cheat_patterns import CheatPatternModule` |
+| Round Simulator | `from src.intelligence.round_simulator import RoundSimulatorModule` |
 
 ---
 
-### Analysis Report
+## Models
 
-**GET** `/demos/{demo_id}/report`
+### Feedback
 
-Get full analysis report.
-
-```json
-{
-  "demo_id": "550e8400-e29b-41d4-a716-446655440000",
-  "map": "de_dust2",
-  "score": "16-12",
-  "player": {
-    "steam_id": "76561198012345678",
-    "name": "PlayerName",
-    "team": "ct"
-  },
-  "top_mistakes": [
-    {
-      "rank": 1,
-      "category": "tactical",
-      "title": "Missed trades at Long A",
-      "description": "Your teammate died 3x at Long with you 400 units away.",
-      "rounds": [5, 9],
-      "severity": "critical",
-      "fix": "Position closer or don't play duo."
-    }
-  ],
-  "fixes": {
-    "mechanical": "Pre-aim is 12° off average. Practice crosshair placement.",
-    "tactical": "Over-rotate by 2.1s average. Trust your anchor.",
-    "mental": "Solo pushes increased 3x after R8. Tilt detected."
-  },
-  "scores": {
-    "peek_iq": 68,
-    "trade_discipline": 42,
-    "crosshair_discipline": 71,
-    "rotation_iq": 55
-  }
-}
+```python
+@dataclass
+class Feedback:
+    category: FeedbackCategory
+    severity: FeedbackSeverity
+    message: str
+    context: FeedbackContext
+    timestamp: float
 ```
 
----
+### Vector3
 
-### Round Data
-
-**GET** `/demos/{demo_id}/rounds/{round_number}`
-
-Get detailed round data.
-
-```json
-{
-  "round_number": 5,
-  "winner": "t",
-  "win_reason": "elimination",
-  "tick_range": [12400, 19800],
-  "events": [
-    {
-      "tick": 14200,
-      "type": "kill",
-      "attacker": "76561198012345678",
-      "victim": "76561198087654321",
-      "weapon": "ak47",
-      "headshot": true
-    }
-  ],
-  "player_analysis": {
-    "peek_classifications": [
-      {
-        "tick": 14100,
-        "classification": "ego",
-        "pre_aim_score": 0.3,
-        "trade_available": false
-      }
-    ]
-  }
-}
+```python
+@dataclass
+class Vector3:
+    x: float
+    y: float
+    z: float
 ```
 
----
+### KillEvent
 
-### Heatmap Data
-
-**GET** `/demos/{demo_id}/heatmap`
-
-Get heatmap data points.
-
-**Query Params**:
-- `event_type`: deaths | kills | all
-- `side`: ct | t | both
-- `round_start`: 1
-- `round_end`: 16
-
-```json
-{
-  "map": "de_dust2",
-  "bounds": {
-    "min_x": -2476,
-    "max_x": 2108,
-    "min_y": -1250,
-    "max_y": 3239
-  },
-  "points": [
-    {
-      "x": -1234,
-      "y": 2567,
-      "weight": 3,
-      "event_type": "death",
-      "rounds": [5, 9, 12]
-    }
-  ]
-}
+```python
+@dataclass
+class KillEvent:
+    tick: int
+    attacker_id: str
+    victim_id: str
+    attacker_position: Optional[Vector3]
+    victim_position: Optional[Vector3]
+    weapon: str
+    headshot: bool
 ```
-
----
-
-### Timeline Data
-
-**GET** `/demos/{demo_id}/timeline`
-
-Get timeline events.
-
-```json
-{
-  "rounds": [
-    {
-      "number": 1,
-      "start_tick": 1200,
-      "end_tick": 8400,
-      "events": [
-        {
-          "tick": 3400,
-          "type": "mistake",
-          "category": "ego_peek",
-          "severity": "major"
-        }
-      ]
-    }
-  ]
-}
-```
-
----
-
-## Error Responses
-
-```json
-{
-  "error": {
-    "code": "DEMO_TOO_LARGE",
-    "message": "Demo file exceeds 500MB limit",
-    "details": {
-      "max_size_mb": 500,
-      "actual_size_mb": 612
-    }
-  }
-}
-```
-
-### Error Codes
-
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| DEMO_NOT_FOUND | 404 | Demo ID doesn't exist |
-| DEMO_TOO_LARGE | 413 | File exceeds size limit |
-| INVALID_FORMAT | 400 | Not a valid CS2 demo |
-| PROCESSING_FAILED | 500 | Analysis failed |
-| RATE_LIMITED | 429 | Too many requests |
-
----
-
-## Rate Limits
-
-| Endpoint | Limit |
-|----------|-------|
-| Upload | 10/hour |
-| Status | 60/minute |
-| Report | 30/minute |
-| Heatmap | 30/minute |
