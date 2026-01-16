@@ -7,9 +7,9 @@
 
 > **Analyze decisions, not stats.** A comprehensive Counter-Strike 2 demo analysis engine with AI-powered tactical intelligence and real-time radar replay visualization.
 
-https://github.com/user-attachments/assets/radar_demo.mp4
+[![Radar Demo](docs/radar_demo.gif)](docs/radar_demo.mp4)
 
-**[▶ Watch Radar Demo Video](docs/radar_demo.mp4)** | [Download MP4](docs/radar_demo.mp4?raw=true)
+*Click the preview above to watch the full video*
 
 ---
 
