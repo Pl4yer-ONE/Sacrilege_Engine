@@ -1,6 +1,6 @@
 """
 SACRILEGE RADAR - Professional CS2 Demo Replay Viewer
-Premium native Python implementation with real map overlays
+Enhanced native Python implementation with all utility effects
 """
 
 import pygame
@@ -49,38 +49,40 @@ MAP_CONFIGS = {
 
 class Colors:
     """Premium color palette."""
-    BG_DARK = (8, 10, 15)
-    BG_PANEL = (15, 18, 25)
-    BG_CARD = (22, 26, 35)
-    BG_HOVER = (30, 35, 48)
+    BG_DARK = (12, 14, 18)
+    BG_PANEL = (18, 22, 28)
+    BG_CARD = (25, 30, 38)
+    BG_HEADER = (20, 24, 32)
     
-    CT_PRIMARY = (77, 166, 255)
-    CT_DARK = (45, 95, 150)
-    CT_GLOW = (100, 180, 255)
+    CT_PRIMARY = (92, 172, 238)
+    CT_SECONDARY = (60, 130, 200)
+    CT_GLOW = (120, 190, 255)
     
-    T_PRIMARY = (255, 200, 50)
-    T_DARK = (150, 115, 30)
-    T_GLOW = (255, 220, 100)
+    T_PRIMARY = (232, 185, 75)
+    T_SECONDARY = (180, 140, 50)
+    T_GLOW = (255, 210, 100)
     
-    ACCENT_CYAN = (0, 212, 255)
-    ACCENT_MAGENTA = (255, 0, 170)
-    ACCENT_GOLD = (255, 215, 0)
+    ACCENT = (0, 200, 255)
+    ACCENT_SECONDARY = (255, 85, 85)
     
-    TEXT_WHITE = (255, 255, 255)
-    TEXT_GRAY = (140, 145, 160)
-    TEXT_DARK = (80, 85, 100)
+    TEXT_WHITE = (240, 245, 250)
+    TEXT_GRAY = (130, 140, 155)
+    TEXT_MUTED = (80, 90, 105)
     
-    HEALTH_HIGH = (68, 255, 136)
-    HEALTH_MED = (255, 180, 50)
-    HEALTH_LOW = (255, 68, 68)
+    HP_FULL = (80, 220, 120)
+    HP_MED = (240, 180, 60)
+    HP_LOW = (230, 70, 70)
     
-    SMOKE = (180, 180, 180, 140)
-    MOLLY = (255, 100, 30, 160)
+    # Utility colors
+    SMOKE = (200, 210, 220)
+    FIRE = (255, 120, 40)
+    FLASH = (255, 255, 200)
+    HE = (255, 100, 100)
     BOMB = (255, 50, 50)
 
 
 class RadarReplayer:
-    """Professional CS2 radar replay viewer."""
+    """Professional CS2 radar replay viewer with full utility visualization."""
     
     def __init__(self, width: int = 1400, height: int = 900):
         pygame.init()
@@ -88,7 +90,8 @@ class RadarReplayer:
         
         self.width = width
         self.height = height
-        self.radar_size = 700
+        self.radar_size = 680
+        self.sidebar_width = 340
         
         self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
         pygame.display.set_caption("SACRILEGE RADAR")
@@ -96,16 +99,11 @@ class RadarReplayer:
         self.clock = pygame.time.Clock()
         
         # Fonts
-        try:
-            self.font_title = pygame.font.SysFont('SF Pro Display', 28, bold=True)
-            self.font_header = pygame.font.SysFont('SF Pro Display', 18, bold=True)
-            self.font_body = pygame.font.SysFont('SF Pro Text', 14)
-            self.font_small = pygame.font.SysFont('SF Pro Text', 11)
-        except:
-            self.font_title = pygame.font.SysFont('Arial', 28, bold=True)
-            self.font_header = pygame.font.SysFont('Arial', 18, bold=True)
-            self.font_body = pygame.font.SysFont('Arial', 14)
-            self.font_small = pygame.font.SysFont('Arial', 11)
+        self.font_title = pygame.font.SysFont('Helvetica', 26, bold=True)
+        self.font_header = pygame.font.SysFont('Helvetica', 16, bold=True)
+        self.font_body = pygame.font.SysFont('Helvetica', 13)
+        self.font_small = pygame.font.SysFont('Helvetica', 11)
+        self.font_tiny = pygame.font.SysFont('Helvetica', 9)
         
         # State
         self.demo_data = None
@@ -127,21 +125,19 @@ class RadarReplayer:
         # Rounds & Kills
         self.rounds = []
         self.kills_by_tick = {}
-        self.dead_players = set()
         self.current_round = 1
         
-        # Utility
-        self.smokes = []
-        self.mollies = []
+        # Utility - enhanced
+        self.smokes = []      # Smoke grenades
+        self.mollies = []     # Molotovs/Incendiaries
+        self.flashes = []     # Flashbangs
+        self.he_grenades = [] # HE Grenades
         
         # Recent kills for kill feed
         self.recent_kills = []
         
-        # UI state
-        self.hovered_player = None
-        
     def load_demo(self, demo_path: Path) -> bool:
-        """Load demo and extract all tick data."""
+        """Load demo and extract all data."""
         from demoparser2 import DemoParser as Demoparser2
         from src.parser.demo_parser import DemoParser
         
@@ -157,7 +153,6 @@ class RadarReplayer:
         map_name = self.demo_data.header.map_name
         self.map_config = MAP_CONFIGS.get(map_name, MAP_CONFIGS['de_mirage'])
         
-        # Load map image
         self._load_map_image(map_name)
         
         # Get player info
@@ -167,20 +162,18 @@ class RadarReplayer:
                 'team': pinfo.team.name,
             }
         
-        # Get round boundaries and kills
+        # Get rounds and kills
         for rd in self.demo_data.rounds:
             self.rounds.append((rd.start_tick, rd.end_tick, rd.round_number))
             for kill in rd.kills:
                 if kill.tick not in self.kills_by_tick:
                     self.kills_by_tick[kill.tick] = []
                 
-                attacker_name = self.players.get(kill.attacker_id, {}).get('name', 'Unknown')
-                victim_name = self.players.get(kill.victim_id, {}).get('name', 'Unknown')
+                attacker_name = self.players.get(kill.attacker_id, {}).get('name', '?')
+                victim_name = self.players.get(kill.victim_id, {}).get('name', '?')
                 attacker_team = self.players.get(kill.attacker_id, {}).get('team', 'CT')
                 
                 self.kills_by_tick[kill.tick].append({
-                    'attacker': kill.attacker_id,
-                    'victim': kill.victim_id,
                     'attacker_name': attacker_name,
                     'victim_name': victim_name,
                     'attacker_team': attacker_team,
@@ -189,56 +182,85 @@ class RadarReplayer:
                     'tick': kill.tick,
                 })
         
-        # Load tick data
-        print("Extracting positions...")
+        # Extract tick data
+        print("Extracting player positions...")
         dp2 = Demoparser2(str(demo_path))
         
-        tick_data = dp2.parse_ticks(["X", "Y", "Z", "yaw", "health", "team_num", "is_alive"])
+        tick_data = dp2.parse_ticks(["X", "Y", "Z", "yaw", "health", "is_alive", "has_bomb"])
         
         if isinstance(tick_data, pd.DataFrame):
             sample_rate = 4
             unique_ticks = sorted(tick_data['tick'].unique())
-            sampled_ticks = unique_ticks[::sample_rate]
-            self.tick_df = tick_data[tick_data['tick'].isin(sampled_ticks)]
+            sampled = unique_ticks[::sample_rate]
+            self.tick_df = tick_data[tick_data['tick'].isin(sampled)]
             self.all_ticks = sorted(self.tick_df['tick'].unique())
         
-        # Extract utility
+        # Extract ALL utility events
+        print("Extracting utility events...")
+        
+        # Smokes (18 second duration)
         try:
-            smoke_data = dp2.parse_event("smokegrenade_detonate")
-            if isinstance(smoke_data, pd.DataFrame):
-                for _, row in smoke_data.iterrows():
+            data = dp2.parse_event("smokegrenade_detonate")
+            if isinstance(data, pd.DataFrame):
+                for _, row in data.iterrows():
                     self.smokes.append({
                         'x': float(row.get('x', 0)),
                         'y': float(row.get('y', 0)),
                         'start': int(row.get('tick', 0)),
-                        'end': int(row.get('tick', 0)) + 1152,
+                        'end': int(row.get('tick', 0)) + 1152,  # ~18 sec
                     })
-        except:
-            pass
+        except: pass
         
+        # Mollies (7 second duration)
         try:
-            molly_data = dp2.parse_event("inferno_startburn")
-            if isinstance(molly_data, pd.DataFrame):
-                for _, row in molly_data.iterrows():
+            data = dp2.parse_event("inferno_startburn")
+            if isinstance(data, pd.DataFrame):
+                for _, row in data.iterrows():
                     self.mollies.append({
                         'x': float(row.get('x', 0)),
                         'y': float(row.get('y', 0)),
                         'start': int(row.get('tick', 0)),
-                        'end': int(row.get('tick', 0)) + 448,
+                        'end': int(row.get('tick', 0)) + 448,  # ~7 sec
                     })
-        except:
-            pass
+        except: pass
+        
+        # Flashbangs (0.5 second visual indicator)
+        try:
+            data = dp2.parse_event("flashbang_detonate")
+            if isinstance(data, pd.DataFrame):
+                for _, row in data.iterrows():
+                    self.flashes.append({
+                        'x': float(row.get('x', 0)),
+                        'y': float(row.get('y', 0)),
+                        'start': int(row.get('tick', 0)),
+                        'end': int(row.get('tick', 0)) + 32,  # quick flash
+                    })
+        except: pass
+        
+        # HE Grenades (0.3 second explosion)
+        try:
+            data = dp2.parse_event("hegrenade_detonate")
+            if isinstance(data, pd.DataFrame):
+                for _, row in data.iterrows():
+                    self.he_grenades.append({
+                        'x': float(row.get('x', 0)),
+                        'y': float(row.get('y', 0)),
+                        'start': int(row.get('tick', 0)),
+                        'end': int(row.get('tick', 0)) + 20,
+                    })
+        except: pass
         
         print(f"Map: {self.map_config.display_name}")
         print(f"Players: {len(self.players)}")
         print(f"Rounds: {len(self.rounds)}")
         print(f"Ticks: {len(self.all_ticks)}")
+        print(f"Utility: {len(self.smokes)} smokes, {len(self.mollies)} fires, {len(self.flashes)} flashes, {len(self.he_grenades)} HEs")
         print("Ready!")
         
         return True
     
     def _load_map_image(self, map_name: str):
-        """Load and prepare map image."""
+        """Load map overlay image."""
         maps_dir = Path(__file__).parent / 'maps'
         img_path = maps_dir / f"{map_name}.png"
         
@@ -250,10 +272,7 @@ class RadarReplayer:
                 )
                 print(f"Loaded map: {img_path.name}")
             except Exception as e:
-                print(f"Failed to load map: {e}")
-                self.map_image = None
-        else:
-            print(f"Map image not found: {img_path}")
+                print(f"Map load failed: {e}")
     
     def run(self):
         """Main game loop."""
@@ -261,13 +280,11 @@ class RadarReplayer:
         last_update = pygame.time.get_ticks()
         
         while running:
-            dt = self.clock.tick(60) / 1000.0
-            
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
-                    self._handle_keydown(event)
+                    self._handle_key(event)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     self._handle_click(event)
                 elif event.type == pygame.VIDEORESIZE:
@@ -277,95 +294,77 @@ class RadarReplayer:
             # Playback
             if self.is_playing and self.all_ticks:
                 now = pygame.time.get_ticks()
-                frame_time = 32 / self.playback_speed
-                if now - last_update > frame_time:
+                if now - last_update > 30 / self.playback_speed:
                     self.current_tick_idx = min(self.current_tick_idx + 1, len(self.all_ticks) - 1)
                     last_update = now
                     self._update_state()
             
             self._render()
             pygame.display.flip()
+            self.clock.tick(60)
         
         pygame.quit()
     
     def _update_state(self):
-        """Update game state for current tick."""
+        """Update current round and kills."""
         if not self.all_ticks:
             return
         
-        current_tick = self.all_ticks[self.current_tick_idx]
+        tick = self.all_ticks[self.current_tick_idx]
         
-        # Update current round
+        # Find current round
         for start, end, rnum in self.rounds:
-            if start <= current_tick <= end:
+            if start <= tick <= end:
                 if rnum != self.current_round:
                     self.current_round = rnum
-                    self.dead_players.clear()
                     self.recent_kills.clear()
                 break
         
-        # Find round start
-        round_start = 0
-        for start, end, rnum in self.rounds:
-            if rnum == self.current_round:
-                round_start = start
-                break
+        # Update kill feed
+        for ktick, kills in self.kills_by_tick.items():
+            if tick - 320 < ktick <= tick:  # 5 second window
+                for k in kills:
+                    if k not in self.recent_kills:
+                        self.recent_kills.append(k)
         
-        # Update deaths and kill feed
-        for tick, kills in self.kills_by_tick.items():
-            if round_start <= tick <= current_tick:
-                for kill in kills:
-                    self.dead_players.add(kill['victim'])
-                    # Add to recent kills if within 5 seconds
-                    if current_tick - tick < 320:
-                        if kill not in self.recent_kills:
-                            self.recent_kills.append(kill)
-        
-        # Trim old kills from feed
-        self.recent_kills = [k for k in self.recent_kills if current_tick - k['tick'] < 320]
+        self.recent_kills = [k for k in self.recent_kills if tick - k['tick'] < 320]
     
-    def _handle_keydown(self, event):
+    def _handle_key(self, event):
         if event.key == pygame.K_SPACE:
             self.is_playing = not self.is_playing
         elif event.key == pygame.K_LEFT:
-            self.current_tick_idx = max(0, self.current_tick_idx - 30)
+            self.current_tick_idx = max(0, self.current_tick_idx - 40)
             self._update_state()
         elif event.key == pygame.K_RIGHT:
-            self.current_tick_idx = min(len(self.all_ticks) - 1, self.current_tick_idx + 30)
+            self.current_tick_idx = min(len(self.all_ticks) - 1, self.current_tick_idx + 40)
             self._update_state()
         elif event.key == pygame.K_UP:
             self.playback_speed = min(8.0, self.playback_speed * 2)
         elif event.key == pygame.K_DOWN:
             self.playback_speed = max(0.25, self.playback_speed / 2)
         elif event.key == pygame.K_r:
-            self._goto_next_round()
+            self._next_round()
         elif event.key == pygame.K_e:
-            self._goto_prev_round()
-        elif event.key == pygame.K_HOME:
-            self.current_tick_idx = 0
-            self._update_state()
-        elif event.key == pygame.K_END:
-            self.current_tick_idx = len(self.all_ticks) - 1
-            self._update_state()
+            self._prev_round()
     
-    def _goto_next_round(self):
+    def _next_round(self):
         if not self.all_ticks:
             return
-        current_tick = self.all_ticks[self.current_tick_idx]
+        tick = self.all_ticks[self.current_tick_idx]
         for start, end, rnum in self.rounds:
-            if start > current_tick:
+            if start > tick:
                 for i, t in enumerate(self.all_ticks):
                     if t >= start:
                         self.current_tick_idx = i
                         self._update_state()
                         return
     
-    def _goto_prev_round(self):
+    def _prev_round(self):
         if not self.all_ticks:
             return
-        current_tick = self.all_ticks[self.current_tick_idx]
+        tick = self.all_ticks[self.current_tick_idx]
         for start, end, rnum in reversed(self.rounds):
-            if end < current_tick:
+            if end < tick:
                 for i, t in enumerate(self.all_ticks):
                     if t >= start:
                         self.current_tick_idx = i
@@ -374,46 +373,44 @@ class RadarReplayer:
     
     def _handle_click(self, event):
         x, y = event.pos
-        tl_y = self.height - 50
-        tl_x, tl_w = 350, self.width - 380
+        # Timeline click
+        tl_y = self.height - 45
+        tl_x = self.sidebar_width + 20
+        tl_w = self.width - self.sidebar_width - 40
         
         if tl_y <= y <= tl_y + 20 and tl_x <= x <= tl_x + tl_w and self.all_ticks:
             progress = (x - tl_x) / tl_w
             self.current_tick_idx = int(progress * (len(self.all_ticks) - 1))
             self._update_state()
     
-    def _get_players_at_tick(self, tick: int) -> list:
+    def _get_players(self, tick: int) -> list:
         if self.tick_df is None:
             return []
         
-        tick_data = self.tick_df[self.tick_df['tick'] == tick]
+        data = self.tick_df[self.tick_df['tick'] == tick]
         players = []
         
-        for _, row in tick_data.iterrows():
-            steamid = str(row.get('steamid', ''))
-            if steamid not in self.players:
+        for _, row in data.iterrows():
+            sid = str(row.get('steamid', ''))
+            if sid not in self.players:
                 continue
             
-            pinfo = self.players[steamid]
-            
-            # Use is_alive from tick data directly
+            pinfo = self.players[sid]
             is_alive = bool(row.get('is_alive', True))
             health = int(row.get('health', 0))
-            
-            # Double check: if health > 0, player is alive
             if health > 0:
                 is_alive = True
             
             players.append({
-                'id': steamid,
+                'id': sid,
                 'name': pinfo['name'],
                 'team': pinfo['team'],
                 'x': float(row.get('X', 0)),
                 'y': float(row.get('Y', 0)),
-                'z': float(row.get('Z', 0)),
                 'yaw': float(row.get('yaw', 0)),
                 'health': health if is_alive else 0,
                 'alive': is_alive,
+                'has_bomb': bool(row.get('has_bomb', False)),
             })
         
         return players
@@ -422,297 +419,310 @@ class RadarReplayer:
         self.screen.fill(Colors.BG_DARK)
         
         if not self.all_ticks:
-            self._render_no_data()
+            txt = self.font_title.render("Loading demo...", True, Colors.TEXT_WHITE)
+            self.screen.blit(txt, (self.width//2 - txt.get_width()//2, self.height//2))
             return
         
-        current_tick = self.all_ticks[self.current_tick_idx]
-        players = self._get_players_at_tick(current_tick)
+        tick = self.all_ticks[self.current_tick_idx]
+        players = self._get_players(tick)
         
-        self._render_header()
-        self._render_sidebar(players)
-        self._render_radar(players, current_tick)
-        self._render_kill_feed()
-        self._render_timeline()
-        self._render_controls_hint()
+        self._draw_header()
+        self._draw_sidebar(players)
+        self._draw_radar(players, tick)
+        self._draw_killfeed()
+        self._draw_timeline()
+        self._draw_legend()
     
-    def _render_no_data(self):
-        text = self.font_title.render("Drop a .dem file to start", True, Colors.TEXT_WHITE)
-        hint = self.font_body.render("Or run: python radar_replayer.py <demo.dem>", True, Colors.TEXT_GRAY)
-        self.screen.blit(text, (self.width//2 - text.get_width()//2, self.height//2 - 30))
-        self.screen.blit(hint, (self.width//2 - hint.get_width()//2, self.height//2 + 10))
-    
-    def _render_header(self):
-        # Header background
-        pygame.draw.rect(self.screen, Colors.BG_PANEL, (0, 0, self.width, 55))
-        pygame.draw.line(self.screen, Colors.ACCENT_CYAN, (0, 55), (self.width, 55), 2)
+    def _draw_header(self):
+        pygame.draw.rect(self.screen, Colors.BG_HEADER, (0, 0, self.width, 50))
         
         # Logo
-        logo = self.font_title.render("SACRILEGE", True, Colors.ACCENT_CYAN)
-        self.screen.blit(logo, (20, 12))
+        logo = self.font_title.render("SACRILEGE", True, Colors.ACCENT)
+        self.screen.blit(logo, (15, 10))
         
-        # Map & Round
+        # Separator
+        pygame.draw.line(self.screen, Colors.ACCENT, (0, 49), (self.width, 49), 2)
+        
+        # Map name and round
         if self.map_config:
-            info = f"{self.map_config.display_name}"
-            text = self.font_header.render(info, True, Colors.TEXT_WHITE)
-            self.screen.blit(text, (self.width//2 - text.get_width()//2, 8))
-            
-            round_text = f"Round {self.current_round} / {len(self.rounds)}"
-            rt = self.font_body.render(round_text, True, Colors.TEXT_GRAY)
-            self.screen.blit(rt, (self.width//2 - rt.get_width()//2, 32))
+            info = f"{self.map_config.display_name}  •  Round {self.current_round}/{len(self.rounds)}"
+            txt = self.font_header.render(info, True, Colors.TEXT_WHITE)
+            self.screen.blit(txt, (self.width//2 - txt.get_width()//2, 15))
         
-        # Speed
-        speed = self.font_small.render(f"{self.playback_speed}x", True, Colors.ACCENT_GOLD)
-        self.screen.blit(speed, (self.width - 50, 20))
-        
-        # Play state
-        state = "▶" if not self.is_playing else "⏸"
-        state_text = self.font_header.render(state, True, Colors.ACCENT_CYAN)
-        self.screen.blit(state_text, (self.width - 100, 15))
+        # Playback state
+        state_icon = "⏸" if self.is_playing else "▶"
+        speed_txt = f"{state_icon}  {self.playback_speed}x"
+        speed = self.font_body.render(speed_txt, True, Colors.ACCENT)
+        self.screen.blit(speed, (self.width - speed.get_width() - 20, 16))
     
-    def _render_sidebar(self, players):
-        sx, sy = 10, 70
-        sw = 320
+    def _draw_sidebar(self, players):
+        sx, sy = 10, 60
+        sw = self.sidebar_width - 20
         
-        # CT section
-        pygame.draw.rect(self.screen, Colors.BG_PANEL, (sx, sy, sw, 30), border_radius=5)
-        pygame.draw.rect(self.screen, Colors.CT_PRIMARY, (sx, sy, 4, 30))
-        ct_label = self.font_header.render("COUNTER-TERRORISTS", True, Colors.CT_PRIMARY)
-        self.screen.blit(ct_label, (sx + 15, sy + 5))
+        # CT Section
+        pygame.draw.rect(self.screen, Colors.BG_PANEL, (sx, sy, sw, 28), border_radius=4)
+        pygame.draw.line(self.screen, Colors.CT_PRIMARY, (sx, sy), (sx, sy + 28), 3)
+        
+        ct_alive = sum(1 for p in players if p['team'] == 'CT' and p['alive'])
+        ct_txt = f"COUNTER-TERRORISTS  ({ct_alive}/5)"
+        self.screen.blit(self.font_header.render(ct_txt, True, Colors.CT_PRIMARY), (sx + 10, sy + 5))
         
         cy = sy + 35
-        ct_alive = sum(1 for p in players if p['team'] == 'CT' and p['alive'])
-        
         for p in sorted(players, key=lambda x: (not x['alive'], x['name'])):
             if p['team'] == 'CT':
-                self._draw_player_card(p, sx, cy, sw)
-                cy += 52
+                self._draw_player_row(p, sx, cy, sw)
+                cy += 48
         
-        # T section
-        ty = cy + 15
-        pygame.draw.rect(self.screen, Colors.BG_PANEL, (sx, ty, sw, 30), border_radius=5)
-        pygame.draw.rect(self.screen, Colors.T_PRIMARY, (sx, ty, 4, 30))
-        t_label = self.font_header.render("TERRORISTS", True, Colors.T_PRIMARY)
-        self.screen.blit(t_label, (sx + 15, ty + 5))
+        # T Section
+        ty = cy + 12
+        pygame.draw.rect(self.screen, Colors.BG_PANEL, (sx, ty, sw, 28), border_radius=4)
+        pygame.draw.line(self.screen, Colors.T_PRIMARY, (sx, ty), (sx, ty + 28), 3)
+        
+        t_alive = sum(1 for p in players if p['team'] == 'T' and p['alive'])
+        t_txt = f"TERRORISTS  ({t_alive}/5)"
+        self.screen.blit(self.font_header.render(t_txt, True, Colors.T_PRIMARY), (sx + 10, ty + 5))
         
         ty += 35
         for p in sorted(players, key=lambda x: (not x['alive'], x['name'])):
             if p['team'] == 'T':
-                self._draw_player_card(p, sx, ty, sw)
-                ty += 52
+                self._draw_player_row(p, sx, ty, sw)
+                ty += 48
     
-    def _draw_player_card(self, p, x, y, w):
-        h = 48
+    def _draw_player_row(self, p, x, y, w):
+        h = 44
+        bg = Colors.BG_CARD if p['alive'] else (20, 22, 26)
+        pygame.draw.rect(self.screen, bg, (x, y, w, h), border_radius=5)
         
-        # Background
-        bg = Colors.BG_CARD if p['alive'] else (18, 18, 22)
-        pygame.draw.rect(self.screen, bg, (x, y, w, h), border_radius=6)
-        
-        # Team indicator
         color = Colors.CT_PRIMARY if p['team'] == 'CT' else Colors.T_PRIMARY
         if not p['alive']:
             color = (color[0]//3, color[1]//3, color[2]//3)
-        pygame.draw.rect(self.screen, color, (x, y, 4, h), border_top_left_radius=6, border_bottom_left_radius=6)
         
-        # Player icon
-        icon_x = x + 20
-        icon_y = y + h//2
-        pygame.draw.circle(self.screen, color, (icon_x, icon_y), 14)
-        if p['alive']:
-            pygame.draw.circle(self.screen, Colors.TEXT_WHITE, (icon_x, icon_y), 14, 2)
+        pygame.draw.line(self.screen, color, (x, y + 5), (x, y + h - 5), 3)
+        
+        # Avatar circle
+        pygame.draw.circle(self.screen, color, (x + 25, y + h//2), 12)
+        
+        # Bomb indicator
+        if p.get('has_bomb'):
+            pygame.draw.circle(self.screen, Colors.BOMB, (x + 25, y + h//2), 5)
         
         # Name
-        name_color = Colors.TEXT_WHITE if p['alive'] else Colors.TEXT_DARK
-        name = self.font_body.render(p['name'], True, name_color)
-        self.screen.blit(name, (x + 45, y + 8))
+        name_color = Colors.TEXT_WHITE if p['alive'] else Colors.TEXT_MUTED
+        self.screen.blit(self.font_body.render(p['name'], True, name_color), (x + 45, y + 6))
         
-        # Health bar or DEAD
         if p['alive']:
-            bar_x, bar_y = x + 45, y + 30
-            bar_w, bar_h = 160, 6
-            
-            pygame.draw.rect(self.screen, (30, 32, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=3)
+            # Health bar
+            bar_x, bar_y, bar_w, bar_h = x + 45, y + 28, 130, 5
+            pygame.draw.rect(self.screen, (40, 45, 55), (bar_x, bar_y, bar_w, bar_h), border_radius=2)
             
             hp = p['health']
-            hp_color = Colors.HEALTH_HIGH if hp > 50 else Colors.HEALTH_MED if hp > 25 else Colors.HEALTH_LOW
-            hp_width = int(bar_w * hp / 100)
-            pygame.draw.rect(self.screen, hp_color, (bar_x, bar_y, hp_width, bar_h), border_radius=3)
+            hp_color = Colors.HP_FULL if hp > 50 else Colors.HP_MED if hp > 25 else Colors.HP_LOW
+            hp_w = int(bar_w * hp / 100)
+            pygame.draw.rect(self.screen, hp_color, (bar_x, bar_y, hp_w, bar_h), border_radius=2)
             
-            hp_text = self.font_small.render(f"{hp}", True, Colors.TEXT_GRAY)
-            self.screen.blit(hp_text, (bar_x + bar_w + 8, bar_y - 2))
+            self.screen.blit(self.font_tiny.render(f"{hp}", True, Colors.TEXT_GRAY), (bar_x + bar_w + 6, bar_y - 2))
         else:
-            dead = self.font_small.render("ELIMINATED", True, Colors.HEALTH_LOW)
-            self.screen.blit(dead, (x + 45, y + 28))
+            self.screen.blit(self.font_small.render("DEAD", True, Colors.HP_LOW), (x + 45, y + 26))
     
-    def _render_radar(self, players, current_tick):
-        rx = 350
-        ry = 70
+    def _draw_radar(self, players, tick):
+        rx = self.sidebar_width + 10
+        ry = 60
         
-        # Radar background
-        pygame.draw.rect(self.screen, Colors.BG_PANEL, (rx - 10, ry - 10, self.radar_size + 20, self.radar_size + 20), border_radius=8)
+        # Background panel
+        pygame.draw.rect(self.screen, Colors.BG_PANEL, (rx - 5, ry - 5, self.radar_size + 10, self.radar_size + 10), border_radius=6)
         
-        # Map image or grid
+        # Map image
         if self.map_image_scaled:
             self.screen.blit(self.map_image_scaled, (rx, ry))
         else:
-            pygame.draw.rect(self.screen, (20, 25, 35), (rx, ry, self.radar_size, self.radar_size))
-            step = self.radar_size // 12
-            for i in range(13):
-                pygame.draw.line(self.screen, (35, 40, 50), (rx + i*step, ry), (rx + i*step, ry + self.radar_size))
-                pygame.draw.line(self.screen, (35, 40, 50), (rx, ry + i*step), (rx + self.radar_size, ry + i*step))
+            pygame.draw.rect(self.screen, (25, 30, 40), (rx, ry, self.radar_size, self.radar_size))
         
-        # Utility
-        self._draw_utility(rx, ry, current_tick)
+        # Draw utility
+        self._draw_all_utility(rx, ry, tick)
         
-        # Players
+        # Draw dead players first
         for p in players:
             if not p['alive']:
-                self._draw_dead_player(p, rx, ry)
+                self._draw_dead_marker(p, rx, ry)
+        
+        # Draw alive players
         for p in players:
             if p['alive']:
-                self._draw_player(p, rx, ry)
+                self._draw_player_marker(p, rx, ry)
         
         # Border
-        pygame.draw.rect(self.screen, Colors.ACCENT_CYAN, (rx - 10, ry - 10, self.radar_size + 20, self.radar_size + 20), 2, border_radius=8)
+        pygame.draw.rect(self.screen, Colors.ACCENT, (rx - 5, ry - 5, self.radar_size + 10, self.radar_size + 10), 2, border_radius=6)
     
-    def _draw_utility(self, rx, ry, current_tick):
-        # Smokes
-        for smoke in self.smokes:
-            if smoke['start'] <= current_tick <= smoke['end']:
-                px, py = self.map_config.world_to_radar(smoke['x'], smoke['y'], 1024)
-                x = rx + int(px * self.radar_size / 1024)
-                y = ry + int(py * self.radar_size / 1024)
-                
-                surf = pygame.Surface((70, 70), pygame.SRCALPHA)
-                pygame.draw.circle(surf, Colors.SMOKE, (35, 35), 32)
-                self.screen.blit(surf, (x - 35, y - 35))
+    def _draw_all_utility(self, rx, ry, tick):
+        scale = self.radar_size / 1024
         
-        # Mollies
-        for molly in self.mollies:
-            if molly['start'] <= current_tick <= molly['end']:
-                px, py = self.map_config.world_to_radar(molly['x'], molly['y'], 1024)
-                x = rx + int(px * self.radar_size / 1024)
-                y = ry + int(py * self.radar_size / 1024)
+        # Smokes - gray cloud
+        for s in self.smokes:
+            if s['start'] <= tick <= s['end']:
+                px, py = self.map_config.world_to_radar(s['x'], s['y'], 1024)
+                x, y = rx + int(px * scale), ry + int(py * scale)
+                
+                surf = pygame.Surface((60, 60), pygame.SRCALPHA)
+                pygame.draw.circle(surf, (*Colors.SMOKE, 150), (30, 30), 28)
+                pygame.draw.circle(surf, (*Colors.SMOKE, 100), (30, 30), 22)
+                self.screen.blit(surf, (x - 30, y - 30))
+        
+        # Mollies - orange fire
+        for m in self.mollies:
+            if m['start'] <= tick <= m['end']:
+                px, py = self.map_config.world_to_radar(m['x'], m['y'], 1024)
+                x, y = rx + int(px * scale), ry + int(py * scale)
                 
                 surf = pygame.Surface((50, 50), pygame.SRCALPHA)
-                pygame.draw.circle(surf, Colors.MOLLY, (25, 25), 22)
+                pygame.draw.circle(surf, (*Colors.FIRE, 180), (25, 25), 22)
+                pygame.draw.circle(surf, (255, 200, 100, 120), (25, 25), 15)
                 self.screen.blit(surf, (x - 25, y - 25))
+        
+        # Flashes - bright burst
+        for f in self.flashes:
+            if f['start'] <= tick <= f['end']:
+                px, py = self.map_config.world_to_radar(f['x'], f['y'], 1024)
+                x, y = rx + int(px * scale), ry + int(py * scale)
+                
+                surf = pygame.Surface((70, 70), pygame.SRCALPHA)
+                pygame.draw.circle(surf, (*Colors.FLASH, 200), (35, 35), 32)
+                pygame.draw.circle(surf, (255, 255, 255, 150), (35, 35), 20)
+                self.screen.blit(surf, (x - 35, y - 35))
+        
+        # HE Grenades - red explosion
+        for h in self.he_grenades:
+            if h['start'] <= tick <= h['end']:
+                px, py = self.map_config.world_to_radar(h['x'], h['y'], 1024)
+                x, y = rx + int(px * scale), ry + int(py * scale)
+                
+                surf = pygame.Surface((60, 60), pygame.SRCALPHA)
+                pygame.draw.circle(surf, (*Colors.HE, 180), (30, 30), 28)
+                pygame.draw.circle(surf, (255, 200, 100, 150), (30, 30), 18)
+                self.screen.blit(surf, (x - 30, y - 30))
     
-    def _draw_player(self, p, rx, ry):
+    def _draw_player_marker(self, p, rx, ry):
+        scale = self.radar_size / 1024
         px, py = self.map_config.world_to_radar(p['x'], p['y'], 1024)
-        x = rx + int(px * self.radar_size / 1024)
-        y = ry + int(py * self.radar_size / 1024)
+        x, y = rx + int(px * scale), ry + int(py * scale)
         
         color = Colors.CT_PRIMARY if p['team'] == 'CT' else Colors.T_PRIMARY
         glow = Colors.CT_GLOW if p['team'] == 'CT' else Colors.T_GLOW
         
         # View cone
         yaw = math.radians(p['yaw'] - 90)
-        cone_len = 35
+        cone_len = 32
         
-        cone_surf = pygame.Surface((90, 90), pygame.SRCALPHA)
+        cone_surf = pygame.Surface((80, 80), pygame.SRCALPHA)
         pts = [
-            (45, 45),
-            (45 + int(math.cos(yaw - 0.35) * cone_len), 45 + int(math.sin(yaw - 0.35) * cone_len)),
-            (45 + int(math.cos(yaw + 0.35) * cone_len), 45 + int(math.sin(yaw + 0.35) * cone_len)),
+            (40, 40),
+            (40 + int(math.cos(yaw - 0.35) * cone_len), 40 + int(math.sin(yaw - 0.35) * cone_len)),
+            (40 + int(math.cos(yaw + 0.35) * cone_len), 40 + int(math.sin(yaw + 0.35) * cone_len)),
         ]
-        pygame.draw.polygon(cone_surf, (*color, 70), pts)
-        self.screen.blit(cone_surf, (x - 45, y - 45))
+        pygame.draw.polygon(cone_surf, (*color, 80), pts)
+        self.screen.blit(cone_surf, (x - 40, y - 40))
         
-        # Player dot with glow
-        pygame.draw.circle(self.screen, (*glow, 80), (x, y), 16)
-        pygame.draw.circle(self.screen, color, (x, y), 12)
-        pygame.draw.circle(self.screen, Colors.TEXT_WHITE, (x, y), 12, 2)
+        # Glow
+        pygame.draw.circle(self.screen, (*glow, 60), (x, y), 14)
         
-        # Name
-        name = self.font_small.render(p['name'][:5], True, (20, 20, 30))
-        self.screen.blit(name, (x - name.get_width()//2, y - name.get_height()//2))
+        # Main dot
+        pygame.draw.circle(self.screen, color, (x, y), 10)
+        pygame.draw.circle(self.screen, Colors.TEXT_WHITE, (x, y), 10, 2)
+        
+        # Bomb indicator
+        if p.get('has_bomb'):
+            pygame.draw.circle(self.screen, Colors.BOMB, (x, y), 5)
+        
+        # Name label
+        name = self.font_tiny.render(p['name'][:5], True, (30, 30, 40))
+        self.screen.blit(name, (x - name.get_width()//2, y - 4))
     
-    def _draw_dead_player(self, p, rx, ry):
+    def _draw_dead_marker(self, p, rx, ry):
+        scale = self.radar_size / 1024
         px, py = self.map_config.world_to_radar(p['x'], p['y'], 1024)
-        x = rx + int(px * self.radar_size / 1024)
-        y = ry + int(py * self.radar_size / 1024)
+        x, y = rx + int(px * scale), ry + int(py * scale)
         
-        color = Colors.CT_DARK if p['team'] == 'CT' else Colors.T_DARK
+        color = Colors.CT_SECONDARY if p['team'] == 'CT' else Colors.T_SECONDARY
         
-        # X mark
-        pygame.draw.line(self.screen, color, (x - 6, y - 6), (x + 6, y + 6), 3)
-        pygame.draw.line(self.screen, color, (x + 6, y - 6), (x - 6, y + 6), 3)
+        pygame.draw.line(self.screen, color, (x - 5, y - 5), (x + 5, y + 5), 2)
+        pygame.draw.line(self.screen, color, (x + 5, y - 5), (x - 5, y + 5), 2)
     
-    def _render_kill_feed(self):
-        kx = self.width - 280
-        ky = 70
+    def _draw_killfeed(self):
+        kx = self.width - 270
+        ky = 60
         
-        for i, kill in enumerate(self.recent_kills[-5:]):
-            y = ky + i * 28
+        for i, k in enumerate(self.recent_kills[-6:]):
+            y = ky + i * 26
             
-            pygame.draw.rect(self.screen, (0, 0, 0, 180), (kx, y, 260, 24), border_radius=4)
+            # Background
+            pygame.draw.rect(self.screen, (0, 0, 0, 200), (kx, y, 255, 22), border_radius=3)
             
-            killer_color = Colors.CT_PRIMARY if kill['attacker_team'] == 'CT' else Colors.T_PRIMARY
-            killer = self.font_small.render(kill['attacker_name'], True, killer_color)
-            self.screen.blit(killer, (kx + 8, y + 5))
+            killer_color = Colors.CT_PRIMARY if k['attacker_team'] == 'CT' else Colors.T_PRIMARY
+            self.screen.blit(self.font_small.render(k['attacker_name'][:8], True, killer_color), (kx + 5, y + 4))
             
-            weapon = self.font_small.render(f"[{kill['weapon']}]", True, Colors.TEXT_GRAY)
-            self.screen.blit(weapon, (kx + 90, y + 5))
+            weapon_txt = f"[{k['weapon'][:8]}]"
+            self.screen.blit(self.font_tiny.render(weapon_txt, True, Colors.TEXT_GRAY), (kx + 80, y + 5))
             
-            hs = " ⬤" if kill['headshot'] else ""
-            victim = self.font_small.render(kill['victim_name'] + hs, True, Colors.HEALTH_LOW)
-            self.screen.blit(victim, (kx + 165, y + 5))
+            hs = "●" if k['headshot'] else ""
+            victim_txt = k['victim_name'][:8] + hs
+            self.screen.blit(self.font_small.render(victim_txt, True, Colors.HP_LOW), (kx + 155, y + 4))
     
-    def _render_timeline(self):
-        ty = self.height - 55
-        tx, tw, th = 350, self.width - 380, 25
+    def _draw_timeline(self):
+        ty = self.height - 50
+        tx = self.sidebar_width + 20
+        tw = self.width - self.sidebar_width - 40
+        th = 18
         
-        # Background
-        pygame.draw.rect(self.screen, Colors.BG_PANEL, (tx - 15, ty - 8, tw + 30, th + 16), border_radius=8)
-        pygame.draw.rect(self.screen, Colors.BG_CARD, (tx, ty, tw, th), border_radius=4)
+        pygame.draw.rect(self.screen, Colors.BG_PANEL, (tx - 10, ty - 5, tw + 20, th + 10), border_radius=5)
+        pygame.draw.rect(self.screen, Colors.BG_CARD, (tx, ty, tw, th), border_radius=3)
         
         if self.all_ticks:
             progress = self.current_tick_idx / max(1, len(self.all_ticks) - 1)
-            
-            # Progress gradient
             prog_w = int(tw * progress)
-            if prog_w > 0:
-                pygame.draw.rect(self.screen, Colors.ACCENT_CYAN, (tx, ty, prog_w, th), border_radius=4)
+            
+            pygame.draw.rect(self.screen, Colors.ACCENT, (tx, ty, prog_w, th), border_radius=3)
             
             # Playhead
-            head_x = tx + prog_w
-            pygame.draw.circle(self.screen, Colors.TEXT_WHITE, (head_x, ty + th//2), 10)
-            pygame.draw.circle(self.screen, Colors.ACCENT_CYAN, (head_x, ty + th//2), 6)
+            pygame.draw.circle(self.screen, Colors.TEXT_WHITE, (tx + prog_w, ty + th//2), 8)
+            pygame.draw.circle(self.screen, Colors.ACCENT, (tx + prog_w, ty + th//2), 5)
             
-            # Round markers
-            for start, end, rnum in self.rounds:
-                if start in self.all_ticks:
-                    idx = self.all_ticks.index(start)
-                    mx = tx + int(idx / max(1, len(self.all_ticks) - 1) * tw)
-                    pygame.draw.line(self.screen, Colors.TEXT_DARK, (mx, ty - 4), (mx, ty + 2), 2)
-            
-            # Time display
+            # Time
             tick = self.all_ticks[self.current_tick_idx]
             secs = tick // 64
-            mins, secs = secs // 60, secs % 60
-            time_str = f"{mins}:{secs:02d}"
-            time_text = self.font_body.render(time_str, True, Colors.TEXT_WHITE)
-            self.screen.blit(time_text, (tx - 60, ty + 3))
+            time_txt = f"{secs // 60}:{secs % 60:02d}"
+            self.screen.blit(self.font_body.render(time_txt, True, Colors.TEXT_WHITE), (tx - 50, ty))
     
-    def _render_controls_hint(self):
-        cy = self.height - 20
-        hints = "SPACE: Play  ←→: Seek  ↑↓: Speed  E/R: Round  HOME/END: Start/End"
-        text = self.font_small.render(hints, True, Colors.TEXT_DARK)
-        self.screen.blit(text, (20, cy))
+    def _draw_legend(self):
+        ly = self.height - 25
+        lx = 15
+        
+        items = [
+            ("●", Colors.SMOKE, "Smoke"),
+            ("●", Colors.FIRE, "Fire"),
+            ("●", Colors.FLASH, "Flash"),
+            ("●", Colors.HE, "HE"),
+        ]
+        
+        for icon, color, label in items:
+            pygame.draw.circle(self.screen, color, (lx + 5, ly + 5), 5)
+            txt = self.font_tiny.render(label, True, Colors.TEXT_MUTED)
+            self.screen.blit(txt, (lx + 15, ly))
+            lx += txt.get_width() + 30
+        
+        # Controls hint
+        hint = "SPACE: Play  ←→: Seek  ↑↓: Speed  E/R: Round"
+        self.screen.blit(self.font_tiny.render(hint, True, Colors.TEXT_MUTED), (self.sidebar_width + 20, ly))
 
 
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='SACRILEGE RADAR')
-    parser.add_argument('demo', nargs='?', help='Demo file path')
+    parser.add_argument('demo', nargs='?', help='Demo file')
     args = parser.parse_args()
     
     replayer = RadarReplayer(1400, 900)
     
     if args.demo:
-        demo_path = Path(args.demo)
-        if demo_path.exists():
-            replayer.load_demo(demo_path)
+        replayer.load_demo(Path(args.demo))
     else:
         demo_dir = Path(__file__).parent.parent / 'demo files'
         if demo_dir.exists():
