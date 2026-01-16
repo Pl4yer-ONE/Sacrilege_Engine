@@ -5,7 +5,7 @@ from typing import Optional
 import json
 
 from src.models import DemoData, RoundData, Team
-from src.intelligence.base import Feedback, FeedbackCategory
+from src.intelligence.base import Feedback, FeedbackCategory, FeedbackSeverity
 
 
 @dataclass
@@ -65,20 +65,25 @@ class DecisionGraphGenerator:
     
     def generate(
         self,
-        demo_data: DemoData,
+        demo_data: Optional[DemoData],
         player_id: str,
         feedbacks: list[Feedback]
     ) -> DecisionGraph:
         """Generate decision graph from analysis results."""
-        player_info = demo_data.players.get(player_id)
-        if not player_info:
-            return DecisionGraph(player_id, "Unknown", demo_data.header.map_name)
-        
-        graph = DecisionGraph(
-            player_id=player_id,
-            player_name=player_info.name,
-            map_name=demo_data.header.map_name,
-        )
+        # Handle None demo_data
+        if demo_data is None:
+            graph = DecisionGraph(
+                player_id=player_id,
+                player_name="Unknown",
+                map_name="unknown",
+            )
+        else:
+            player_info = demo_data.players.get(player_id)
+            graph = DecisionGraph(
+                player_id=player_id,
+                player_name=player_info.name if player_info else "Unknown",
+                map_name=demo_data.header.map_name if demo_data.header else "unknown",
+            )
         
         self.node_counter = 0
         
@@ -94,14 +99,15 @@ class DecisionGraphGenerator:
                 elif node.outcome == "good":
                     graph.good_decisions += 1
         
-        # Create round summaries
-        for round_data in demo_data.rounds:
-            round_nodes = [n for n in graph.nodes if n.round_number == round_data.round_number]
-            graph.round_summaries[round_data.round_number] = {
-                "total_decisions": len(round_nodes),
-                "good": sum(1 for n in round_nodes if n.outcome == "good"),
-                "bad": sum(1 for n in round_nodes if n.outcome == "bad"),
-            }
+        # Create round summaries from demo_data if available
+        if demo_data and demo_data.rounds:
+            for round_data in demo_data.rounds:
+                round_nodes = [n for n in graph.nodes if n.round_number == round_data.round_number]
+                graph.round_summaries[round_data.round_number] = {
+                    "total_decisions": len(round_nodes),
+                    "good": sum(1 for n in round_nodes if n.outcome == "good"),
+                    "bad": sum(1 for n in round_nodes if n.outcome == "bad"),
+                }
         
         return graph
     
@@ -116,8 +122,8 @@ class DecisionGraphGenerator:
             FeedbackCategory.MENTAL: "mental",
         }.get(feedback.category, "other")
         
-        # Determine outcome from severity
-        outcome = "bad" if feedback.severity.value >= 2 else "neutral"
+        # Determine outcome from severity (critical/major = bad, minor = neutral)
+        outcome = "bad" if feedback.severity in (FeedbackSeverity.CRITICAL, FeedbackSeverity.MAJOR) else "neutral"
         
         # Create a node for each round mentioned
         for round_num in feedback.rounds or [0]:
