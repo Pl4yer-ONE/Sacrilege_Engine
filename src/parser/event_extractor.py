@@ -86,16 +86,53 @@ class EventExtractor:
         if df.empty:
             return []
         
+        # Try to get position data from tick parsing (only for kill ticks)
+        position_cache = {}
+        try:
+            # Get unique ticks from kills
+            kill_ticks = df['tick'].unique().tolist() if 'tick' in df.columns else []
+            
+            if kill_ticks:
+                tick_data = self.parser.parse_ticks(["X", "Y", "Z"], ticks=kill_ticks)
+                tick_df = _to_dataframe(tick_data)
+                if not tick_df.empty:
+                    # Create lookup: (tick, steamid) -> (x, y, z)
+                    for _, row in tick_df.iterrows():
+                        key = (int(_safe_get(row, 'tick', 0)), str(_safe_get(row, 'steamid', '')))
+                        position_cache[key] = (
+                            float(_safe_get(row, 'X', 0)),
+                            float(_safe_get(row, 'Y', 0)),
+                            float(_safe_get(row, 'Z', 0)),
+                        )
+        except Exception as e:
+            pass  # Position data optional
+        
         kills = []
         for _, row in df.iterrows():
             try:
+                tick = int(_safe_get(row, 'tick', 0))
+                attacker_steamid = str(_safe_get(row, 'attacker_steamid', ''))
+                victim_steamid = str(_safe_get(row, 'user_steamid', ''))
+                
+                # Look up positions
+                attacker_pos = None
+                victim_pos = None
+                
+                if (tick, attacker_steamid) in position_cache:
+                    x, y, z = position_cache[(tick, attacker_steamid)]
+                    attacker_pos = Vector3(x, y, z)
+                
+                if (tick, victim_steamid) in position_cache:
+                    x, y, z = position_cache[(tick, victim_steamid)]
+                    victim_pos = Vector3(x, y, z)
+                
                 kills.append(KillEvent(
-                    tick=int(_safe_get(row, 'tick', 0)),
+                    tick=tick,
                     event_type=EventType.KILL,
-                    attacker_id=str(_safe_get(row, 'attacker_steamid', '')),
-                    victim_id=str(_safe_get(row, 'user_steamid', '')),
-                    attacker_position=None,  # Simplified for now
-                    victim_position=None,
+                    attacker_id=attacker_steamid,
+                    victim_id=victim_steamid,
+                    attacker_position=attacker_pos,
+                    victim_position=victim_pos,
                     weapon=str(_safe_get(row, 'weapon', '')),
                     headshot=bool(_safe_get(row, 'headshot', False)),
                     penetrated=bool(_safe_get(row, 'penetrated', False)),
