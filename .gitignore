@@ -1,12 +1,8 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -36,31 +32,31 @@ env/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
 
 # Testing
-.pytest_cache/
-.coverage
-htmlcov/
 .tox/
 .nox/
-
-# MyPy
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
 .mypy_cache/
-.dmypy.json
-dmypy.json
 
-# Demo files (large binary files)
+# OS
+.DS_Store
+Thumbs.db
+
+# Demo files (too large for git)
 demo files/
 *.dem
 
-# Environment variables
+# Environment
 .env
 .env.local
 .env.*.local
-
-# OS files
-.DS_Store
-Thumbs.db
 
 # Logs
 *.log
@@ -70,5 +66,7 @@ logs/
 *.db
 *.sqlite
 
-# Test artifacts
-test.txt
+# Temporary
+tmp/
+temp/
+*.tmp

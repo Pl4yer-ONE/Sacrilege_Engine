@@ -1,0 +1,92 @@
+SACRILEGE ENGINE TEST REPORT
+Generated: 2026-01-16
+============================================================
+
+SUMMARY: 21 PASSED, 0 FAILED
+
+============================================================
+PASSED TESTS
+============================================================
+✅ Core imports
+✅ Parser imports
+✅ Intelligence imports (8 modules)
+✅ World imports
+✅ Output imports
+✅ API imports
+✅ Vector3 math
+✅ ViewAngles
+✅ MapLoader (9 maps)
+✅ Callout zones
+✅ Smoke blocking
+✅ Visibility FOV
+✅ Win probability model
+✅ Demo validator
+✅ Invalid demo handling
+✅ Demo parser
+✅ Event extraction
+✅ Full analysis (8 modules)
+✅ Individual module execution
+✅ Feedback generator
+✅ Demo validation (with size check)
+
+============================================================
+FAILED TESTS
+============================================================
+(none)
+
+============================================================
+NOTES
+============================================================
+
+DEMO FILES TESTED:
+- 11/13 demos valid (under 500MB size limit)
+- 2 demos too large (gamerlegion-vs-venom-m1-train.dem: 650MB,
+  phantom-vs-hyperspirit-m2-dust2.dem: 604MB)
+- Size limit is configurable in config.py (max_demo_size_mb)
+
+INTELLIGENCE MODULES (8/8):
+1. peek_iq - Classifies peeks (smart/info/ego/panic/forced)
+2. trade_discipline - Trade opportunity analysis
+3. crosshair_discipline - Aim fundamentals
+4. utility_intelligence - Flash/smoke effectiveness
+5. rotation_iq - Over-rotation detection
+6. tilt_detector - Mental degradation patterns
+7. cheat_patterns - Suspicious pattern detection
+8. round_simulator - Win probability impact
+
+VISIBILITY SYSTEM:
+- Map geometry for 9 CS2 maps
+- Callout zones working (e.g., A Site, B Apps, Mid)
+- Smoke occlusion via ray-sphere intersection
+- FOV-based line of sight calculation
+
+BUGS FIXED DURING TESTING:
+1. API imports - installed python-multipart dependency
+2. Smoke blocking - fixed ray-sphere intersection for segments
+   passing entirely through sphere (t1 < 0 and t2 > 1 case)
+
+============================================================
+SAMPLE OUTPUT
+============================================================
+
+Player: keen (ec-banga-vs-semperfi-mirage.dem)
+
+Scores:
+  peek_iq: 60/100
+  trade_discipline: 10/100
+  crosshair_discipline: 25/100
+  utility_intelligence: 30/100
+  rotation_iq: 0/100
+  tilt_detector: 62/100
+  cheat_patterns: 100/100
+  round_simulator: 48/100
+
+Top 3 Mistakes:
+1. Costly deaths: 2 high-impact rounds
+2. Missed trades: 122 opportunities
+3. Tilt detected at Round 6
+
+Fixes:
+🎯 MECHANICAL: Practice crosshair at head height
+🧠 TACTICAL: Position closer to teammates
+💭 MENTAL: Don't change playstyle when losing

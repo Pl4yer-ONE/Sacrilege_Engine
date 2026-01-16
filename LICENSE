@@ -1,21 +1,151 @@
-MIT License
+SACRILEGE ENGINE — END USER LICENSE AGREEMENT (EULA)
+=====================================================
 
-Copyright (c) 2026 Sacrilege Engine
+Version 1.0
+Effective Date: January 16, 2026
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+IMPORTANT: READ THIS LICENSE AGREEMENT CAREFULLY BEFORE USING THIS SOFTWARE.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+By accessing, downloading, installing, or using the Sacrilege Engine software
+("Software"), you agree to be bound by the terms of this End User License
+Agreement ("Agreement"). If you do not agree to these terms, do not use the
+Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+1. DEFINITIONS
+--------------
+
+"Software" means the Sacrilege Engine source code, binaries, documentation,
+and all associated files.
+
+"Licensor" means the copyright holder(s) of the Sacrilege Engine.
+
+"You" or "User" means the individual or entity accessing or using the Software.
+
+"Commercial Use" means any use of the Software that directly or indirectly
+generates revenue, including but not limited to: selling, licensing, offering
+as a service, or incorporating into commercial products.
+
+2. GRANT OF LICENSE
+-------------------
+
+Subject to the terms of this Agreement, the Licensor grants you a limited,
+non-exclusive, non-transferable, revocable license to:
+
+  a) View and study the source code for personal educational purposes only.
+  
+  b) Run the Software locally for personal, non-commercial analysis of your
+     own CS2 demo files.
+
+3. RESTRICTIONS
+---------------
+
+You may NOT, without prior written permission from the Licensor:
+
+  a) Use the Software for any Commercial Use.
+  
+  b) Modify, adapt, translate, or create derivative works of the Software.
+  
+  c) Distribute, sublicense, lease, rent, or lend the Software to any third
+     party.
+  
+  d) Remove, alter, or obscure any copyright, trademark, or proprietary
+     notices in the Software.
+  
+  e) Reverse engineer, decompile, or disassemble the Software, except to the
+     extent permitted by applicable law.
+  
+  f) Use the Software to provide services to third parties (SaaS, API access,
+     consulting, etc.).
+  
+  g) Use the Software in any way that violates applicable laws or regulations.
+  
+  h) Use the Software to analyze demo files you do not own or have permission
+     to analyze.
+
+4. INTELLECTUAL PROPERTY
+------------------------
+
+The Software is protected by copyright and other intellectual property laws.
+The Licensor retains all right, title, and interest in and to the Software,
+including all intellectual property rights. This Agreement does not grant you
+any rights to trademarks or service marks of the Licensor.
+
+5. NO WARRANTY
+--------------
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. THE LICENSOR DOES NOT
+WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE OR UNINTERRUPTED.
+
+6. LIMITATION OF LIABILITY
+--------------------------
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, DATA,
+OR BUSINESS OPPORTUNITIES, ARISING OUT OF OR RELATED TO YOUR USE OF THE
+SOFTWARE, EVEN IF THE LICENSOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGES.
+
+THE LICENSOR'S TOTAL LIABILITY SHALL NOT EXCEED THE AMOUNT YOU PAID FOR THE
+SOFTWARE, IF ANY.
+
+7. TERMINATION
+--------------
+
+This Agreement is effective until terminated. Your rights under this Agreement
+will terminate automatically without notice if you fail to comply with any
+term of this Agreement. Upon termination, you must destroy all copies of the
+Software in your possession or control.
+
+8. COMMERCIAL LICENSING
+-----------------------
+
+For Commercial Use, enterprise licensing, or custom development, contact the
+Licensor to negotiate a separate commercial license agreement.
+
+9. UPDATES AND MODIFICATIONS
+----------------------------
+
+The Licensor may update or modify the Software at any time without notice.
+Updates may be subject to additional or different terms. The Licensor is not
+obligated to provide support, maintenance, updates, or bug fixes.
+
+10. GOVERNING LAW
+-----------------
+
+This Agreement shall be governed by and construed in accordance with the laws
+of the jurisdiction in which the Licensor is located, without regard to
+conflict of law principles.
+
+11. ENTIRE AGREEMENT
+--------------------
+
+This Agreement constitutes the entire agreement between you and the Licensor
+regarding the Software and supersedes all prior agreements and understandings.
+
+12. SEVERABILITY
+----------------
+
+If any provision of this Agreement is held to be unenforceable, that provision
+shall be modified to the minimum extent necessary to make it enforceable, and
+the remaining provisions shall continue in full force and effect.
+
+13. WAIVER
+----------
+
+The failure of the Licensor to enforce any right or provision of this Agreement
+shall not constitute a waiver of such right or provision.
+
+14. CONTACT
+-----------
+
+For licensing inquiries, permissions, or questions about this Agreement,
+contact the Licensor through the official repository or designated channels.
+
+=====================================================
+Copyright (c) 2026 Sacrilege Engine. All Rights Reserved.
+=====================================================
+
+BY USING THIS SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT,
+UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS AND CONDITIONS.
