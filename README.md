@@ -1,19 +1,26 @@
 # SACRILEGE ENGINE
 
+<div align="center">
+
 ## CS2 Demo Decision Intelligence System
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=for-the-badge)](/)
 
-> **Analyze decisions, not stats.** A comprehensive Counter-Strike 2 demo analysis engine with AI-powered tactical intelligence and real-time radar replay visualization.
+**Analyze decisions, not stats.**
 
-[![Radar Preview](docs/radar_preview.gif)](docs/radar_demo.mp4)
+A comprehensive Counter-Strike 2 demo analysis engine with AI-powered tactical intelligence and real-time radar replay visualization.
 
-*↑ Click GIF to watch full 30-second video ↑*
+[![Radar Demo](docs/radar_preview.gif)](docs/radar_demo.mp4)
+
+*↑ Click to watch full video ↑*
+
+</div>
 
 ---
 
-## Features
+## ✨ Features
 
 ### 🔬 Intelligence Modules
 | Module | Description |
@@ -29,20 +36,19 @@
 
 ### 🎯 Radar Replayer
 - **Native Python** visualization with pygame
-- **Real map overlays** for all competitive maps
-- **Tick-accurate** player positions and view angles
-- **Utility visualization** (smokes, molotovs)
-- **Timeline** with round navigation
+- **Real map overlays** for all 8 competitive maps
+- **Tick-accurate** player positions
+- **Live statistics** - HP, equipment, kills
+- **Utility visualization** - smokes, molotovs, flashes, HEs
 
 ### 📊 Visualization
 - Heatmap generation (kills, deaths, utility)
 - Timeline event sequences
 - Decision graph visualization
-- Team synergy analysis
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
 # Clone
@@ -68,44 +74,65 @@ python radar/radar_replayer.py "path/to/demo.dem"
 
 ---
 
-## Radar Controls
+## 🎮 Radar Controls
 
 | Key | Action |
-|-----|--------|
-| `SPACE` | Play/Pause |
-| `← →` | Seek backward/forward |
-| `↑ ↓` | Speed up/slow down |
-| `E / R` | Previous/Next round |
-| `HOME / END` | Jump to start/end |
+|:---:|--------|
+| `SPACE` | Play / Pause |
+| `← →` | Seek backward / forward |
+| `↑ ↓` | Speed up / down |
+| `E` / `R` | Previous / Next round |
+| `HOME` / `END` | Jump to start / end |
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 Sacrilege_Engine/
 ├── src/
 │   ├── parser/          # Demo parsing (demoparser2)
-│   ├── intelligence/    # AI analysis modules
-│   ├── visualization/   # Data visualization
+│   ├── intelligence/    # 8 AI analysis modules
+│   ├── visualization/   # Heatmaps, timelines, graphs
 │   └── world/           # Map geometry & visibility
 ├── radar/
 │   ├── radar_replayer.py  # Native radar viewer
 │   └── maps/              # Map overlay images
-├── docs/                # Documentation
-└── demo files/          # Sample demos
+└── docs/                # Documentation
 ```
 
 ---
 
-## Documentation
+## 📖 Documentation
 
-See [docs/TECHNICAL_PAPER.md](docs/TECHNICAL_PAPER.md) for detailed IEEE-format technical documentation.
+| Document | Description |
+|----------|-------------|
+| [Technical Paper](docs/TECHNICAL_PAPER.md) | IEEE-format system documentation |
+| [API Reference](docs/API_REFERENCE.md) | Developer API guide |
+| [Architecture](docs/ARCHITECTURE.md) | System design |
+| [Intelligence Modules](docs/INTELLIGENCE_MODULES.md) | Module specifications |
 
 ---
 
-## License
+## 🛠️ Requirements
+
+- Python 3.9+
+- pygame
+- pandas
+- demoparser2
+
+---
+
+## 📜 License
 
 **Proprietary Commercial License** - See [LICENSE](LICENSE)
 
 © 2026 Pl4yer-ONE. All rights reserved.
+
+---
+
+<div align="center">
+
+**Built with ❤️ for the CS2 community**
+
+</div>
