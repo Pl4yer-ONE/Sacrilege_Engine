@@ -1,50 +1,90 @@
-# SACRILEGE ENGINE
-
 <div align="center">
 
-## CS2 Demo Decision Intelligence System
+# SACRILEGE ENGINE
 
-[![Python 3.9+](https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=for-the-badge)](/)
+### *The Unforgiving CS2 Demo Intelligence System*
 
-**Analyze decisions, not stats.**
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![CS2](https://img.shields.io/badge/CS2-Demo%20Analysis-FF6B00?style=for-the-badge&logo=counter-strike)](https://counter-strike.net)
+[![License](https://img.shields.io/badge/License-Proprietary-DC143C?style=for-the-badge)](LICENSE)
 
-A comprehensive Counter-Strike 2 demo analysis engine with AI-powered tactical intelligence and real-time radar replay visualization.
+<br>
 
-[![Radar Demo](docs/radar_preview.gif)](docs/radar_demo.mp4)
+**Don't just watch demos. *Understand* them.**
 
-*↑ Click to watch full video ↑*
+Sacrilege Engine is a next-generation tactical intelligence platform that transforms raw CS2 demo files into actionable insights. Every death is dissected. Every mistake exposed. No mercy.
+
+<br>
+
+[![Radar Preview](docs/radar_preview.gif)](docs/radar_demo.mp4)
+
+*Real-time death analysis with blame attribution and performance rankings*
+
+---
+
+[**Features**](#-features) · [**Quick Start**](#-quick-start) · [**Documentation**](#-documentation) · [**Philosophy**](#-philosophy)
 
 </div>
 
 ---
 
-## ✨ Features
+## 🎯 Features
 
-### 🔬 Intelligence Modules
-| Module | Description |
-|--------|-------------|
-| **Peek IQ** | Detects advantageous vs disadvantageous peek patterns |
-| **Utility Intelligence** | Flash/smoke effectiveness and ROI analysis |
-| **Trade Discipline** | Trade timing and positioning evaluation |
-| **Crosshair Discipline** | Pre-aim and crosshair placement scoring |
-| **Rotation IQ** | Rotation decision quality and timing |
-| **Tilt Detector** | Mental state degradation detection |
-| **Cheat Patterns** | Statistical anomaly detection |
-| **Round Simulator** | Win probability modeling |
+<table>
+<tr>
+<td width="50%">
 
-### 🎯 Radar Replayer
-- **Native Python** visualization with pygame
-- **Real map overlays** for all 8 competitive maps
-- **Tick-accurate** player positions
-- **Live statistics** - HP, equipment, kills
-- **Utility visualization** - smokes, molotovs, flashes, HEs
+### 💀 BRUTAL Death Analyzer
+Every death gets dissected with **15 mistake classifications**:
+- **ISOLATED** — Died alone, no support
+- **CROSSFIRE** — Multiple angles exposed  
+- **SOLO PUSH** — Rushed without team
+- **NO TRADE** — Teammate didn't trade
+- **FLASHED** — Killed while blind
 
-### 📊 Visualization
-- Heatmap generation (kills, deaths, utility)
-- Timeline event sequences
-- Decision graph visualization
+Each death receives a **blame score (0-100%)** that feeds into live player rankings.
+
+</td>
+<td width="50%">
+
+### 📊 Live Performance Rankings
+Real-time **S/A/B/C/D/F grades** based on:
+- Kill/Death ratio
+- Average blame per death
+- Tactical mistakes made
+- Trade success rate
+
+**Performance Score** = KD contribution - blame penalty
+
+*No excuses. Just data.*
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🗺️ Radar Replayer
+Tick-perfect visualization with:
+- All 8 competitive maps
+- Player positions & health
+- Utility tracking (smokes, mollies, flashes)
+- Kill animations
+- Death analysis popups
+
+</td>
+<td width="50%">
+
+### 🧠 Intelligence Modules
+8 specialized analysis engines:
+- **Peek IQ** — Peek advantage detection
+- **Trade Discipline** — Trade timing analysis
+- **Utility ROI** — Flash/smoke effectiveness
+- **Tilt Detector** — Mental state tracking
+- **Cheat Patterns** — Statistical anomalies
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -60,61 +100,64 @@ python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -e .
 
-# Analyze a demo
-python -c "
-from src.analysis_orchestrator import AnalysisOrchestrator
-orchestrator = AnalysisOrchestrator()
-result = orchestrator.analyze('your_demo.dem', 'PlayerName')
-print(result.format_report())
-"
-
-# Run radar replayer
+# Launch Radar Replayer
 python radar/radar_replayer.py "path/to/demo.dem"
 ```
 
----
-
-## 🎮 Radar Controls
+### Controls
 
 | Key | Action |
-|:---:|--------|
+|:---:|:-------|
 | `SPACE` | Play / Pause |
 | `← →` | Seek backward / forward |
-| `↑ ↓` | Speed up / down |
+| `↑ ↓` | Playback speed |
 | `E` / `R` | Previous / Next round |
-| `HOME` / `END` | Jump to start / end |
-
----
-
-## 📁 Project Structure
-
-```
-Sacrilege_Engine/
-├── src/
-│   ├── parser/          # Demo parsing (demoparser2)
-│   ├── intelligence/    # 8 AI analysis modules
-│   ├── visualization/   # Heatmaps, timelines, graphs
-│   └── world/           # Map geometry & visibility
-├── radar/
-│   ├── radar_replayer.py  # Native radar viewer
-│   └── maps/              # Map overlay images
-└── docs/                # Documentation
-```
 
 ---
 
 ## 📖 Documentation
 
 | Document | Description |
-|----------|-------------|
+|:---------|:------------|
 | [Technical Paper](docs/TECHNICAL_PAPER.md) | IEEE-format system documentation |
-| [API Reference](docs/API_REFERENCE.md) | Developer API guide |
-| [Architecture](docs/ARCHITECTURE.md) | System design |
+| [Architecture](docs/ARCHITECTURE.md) | System design & data flow |
 | [Intelligence Modules](docs/INTELLIGENCE_MODULES.md) | Module specifications |
+| [API Reference](docs/API_REFERENCE.md) | Developer integration guide |
+| [Database Schema](docs/DATABASE_SCHEMA.md) | Data model reference |
 
 ---
 
-## 🛠️ Requirements
+## 🏗️ Project Structure
+
+```
+Sacrilege_Engine/
+├── src/
+│   ├── parser/              # Demo file parsing
+│   ├── intelligence/        # Analysis modules
+│   │   └── death_analyzer.py   # BRUTAL death analysis
+│   ├── visualization/       # Heatmaps & graphs
+│   └── world/              # Map geometry
+├── radar/
+│   ├── radar_replayer.py   # Main application
+│   └── maps/               # Map overlays
+└── docs/                   # Documentation
+```
+
+---
+
+## 💡 Philosophy
+
+> *"The truth hurts. Sacrilege delivers it anyway."*
+
+Traditional demo review shows you *what* happened. Sacrilege tells you *why* — and assigns blame. Every isolated death, every missed trade, every stupid peek gets catalogued and scored.
+
+**This isn't validation software. It's accountability software.**
+
+Players who improve fastest are those who confront their mistakes honestly. Sacrilege makes that confrontation unavoidable.
+
+---
+
+## ⚙️ Requirements
 
 - Python 3.9+
 - pygame
@@ -125,14 +168,20 @@ Sacrilege_Engine/
 
 ## 📜 License
 
-**Proprietary Commercial License** - See [LICENSE](LICENSE)
+**Proprietary Commercial License**
 
-© 2026 Pl4yer-ONE. All rights reserved.
+© 2026 Pl4yer-ONE. All rights reserved. See [LICENSE](LICENSE) for details.
 
 ---
 
 <div align="center">
 
-**Built with ❤️ for the CS2 community**
+**Built for players who want the truth.**
+
+*Not the comfortable version.*
+
+<br>
+
+[![GitHub](https://img.shields.io/badge/GitHub-Pl4yer--ONE-181717?style=flat-square&logo=github)](https://github.com/Pl4yer-ONE)
 
 </div>
