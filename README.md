@@ -16,15 +16,24 @@ Sacrilege Engine is a next-generation tactical intelligence platform that transf
 
 <br>
 
-[![Radar Preview](docs/radar_preview.gif)](docs/radar_demo.mp4)
+[![Radar Preview](docs/radar_preview.gif)](docs/radar_dust2.mp4)
 
 *Real-time death analysis with blame attribution and performance rankings*
 
 ---
 
-[**Features**](#-features) · [**Quick Start**](#-quick-start) · [**Documentation**](#-documentation) · [**Philosophy**](#-philosophy)
+[**Demo Videos**](#-demo-videos) · [**Features**](#-features) · [**Quick Start**](#-quick-start) · [**Documentation**](#-documentation)
 
 </div>
+
+---
+
+## 🎬 Demo Videos
+
+| Map | Video | Description |
+|:---:|:-----:|:------------|
+| **Dust2** | [📹 Watch](docs/radar_dust2.mp4) | GamerLegion vs Venom - 10s tactical breakdown |
+| **Mirage** | [📹 Watch](docs/radar_mirage.mp4) | EC Banga vs Semperfi - Live death analysis |
 
 ---
 
@@ -36,55 +45,57 @@ Sacrilege Engine is a next-generation tactical intelligence platform that transf
 
 ### 💀 BRUTAL Death Analyzer
 Every death gets dissected with **15 mistake classifications**:
-- **ISOLATED** — Died alone, no support
-- **CROSSFIRE** — Multiple angles exposed  
-- **SOLO PUSH** — Rushed without team
-- **NO TRADE** — Teammate didn't trade
-- **FLASHED** — Killed while blind
 
-Each death receives a **blame score (0-100%)** that feeds into live player rankings.
+| Type | Severity | Description |
+|:-----|:--------:|:------------|
+| **ISOLATED** | 🔴 5 | Died alone, no support |
+| **CROSSFIRE** | 🔴 5 | Multiple angles exposed |
+| **SOLO PUSH** | 🔴 5 | Rushed without team |
+| **NO TRADE** | 🟠 4 | Teammate didn't trade |
+| **FLASHED** | 🟡 3 | Killed while blind |
+| **FAIR DUEL** | ⚪ 1 | Lost aim battle |
+
+Each death receives a **blame score (0-100%)**.
 
 </td>
 <td width="50%">
 
 ### 📊 Live Performance Rankings
 Real-time **S/A/B/C/D/F grades** based on:
-- Kill/Death ratio
-- Average blame per death
-- Tactical mistakes made
-- Trade success rate
 
-**Performance Score** = KD contribution - blame penalty
+```
+Grade = KD Ratio × 40 - Blame Penalty + 20
+```
 
-*No excuses. Just data.*
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-### 🗺️ Radar Replayer
-Tick-perfect visualization with:
-- All 8 competitive maps
-- Player positions & health
-- Utility tracking (smokes, mollies, flashes)
-- Kill animations
-- Death analysis popups
-
-</td>
-<td width="50%">
-
-### 🧠 Intelligence Modules
-8 specialized analysis engines:
-- **Peek IQ** — Peek advantage detection
-- **Trade Discipline** — Trade timing analysis
-- **Utility ROI** — Flash/smoke effectiveness
-- **Tilt Detector** — Mental state tracking
-- **Cheat Patterns** — Statistical anomalies
+| Grade | Score | Meaning |
+|:-----:|:-----:|:--------|
+| **S** | 80+ | Elite performance |
+| **A** | 65+ | Strong player |
+| **B** | 50+ | Solid contribution |
+| **C** | 35+ | Average play |
+| **D** | 20+ | Underperforming |
+| **F** | <20 | Liability |
 
 </td>
 </tr>
 </table>
+
+---
+
+## 🔥 Death Analysis Popup
+
+When a player dies, a detailed popup appears showing:
+
+```
+┌────────────────────────────────┐
+│ PlayerName    killed by Enemy  │  ← Victim & Killer
+│ CROSSFIRE                   [5]│  ← Primary Mistake + Severity
+│                                │
+│ Team: 892u    vs 3 enemies     │  ← Distance + Enemy count
+│ NOT TRADED   Blame: 90%        │  ← Trade status + Blame
+│ +ISOLATED, NO_TRADE            │  ← Additional mistakes
+└────────────────────────────────┘
+```
 
 ---
 
@@ -119,11 +130,9 @@ python radar/radar_replayer.py "path/to/demo.dem"
 
 | Document | Description |
 |:---------|:------------|
-| [Technical Paper](docs/TECHNICAL_PAPER.md) | IEEE-format system documentation |
-| [Architecture](docs/ARCHITECTURE.md) | System design & data flow |
-| [Intelligence Modules](docs/INTELLIGENCE_MODULES.md) | Module specifications |
-| [API Reference](docs/API_REFERENCE.md) | Developer integration guide |
-| [Database Schema](docs/DATABASE_SCHEMA.md) | Data model reference |
+| [CHANGELOG](CHANGELOG.md) | Version history |
+| [CONTRIBUTING](CONTRIBUTING.md) | Development guide |
+| [Technical Paper](docs/TECHNICAL_PAPER.md) | IEEE-format documentation |
 
 ---
 
@@ -135,13 +144,28 @@ Sacrilege_Engine/
 │   ├── parser/              # Demo file parsing
 │   ├── intelligence/        # Analysis modules
 │   │   └── death_analyzer.py   # BRUTAL death analysis
-│   ├── visualization/       # Heatmaps & graphs
-│   └── world/              # Map geometry
+│   └── visualization/       # Heatmaps & graphs
 ├── radar/
 │   ├── radar_replayer.py   # Main application
-│   └── maps/               # Map overlays
-└── docs/                   # Documentation
+│   └── maps/               # Map overlays (8 maps)
+└── docs/
+    ├── radar_dust2.mp4     # Demo: Dust2
+    ├── radar_mirage.mp4    # Demo: Mirage
+    └── radar_preview.gif   # Preview animation
 ```
+
+---
+
+## 📊 Test Results
+
+Rigorously tested across **4 maps, 330 deaths analyzed**:
+
+| Map | Deaths | Top Mistakes |
+|:----|:------:|:-------------|
+| Dust2 | 81 | crossfire(44), isolated(31) |
+| Ancient | 75 | crossfire(41), isolated(28) |
+| Overpass | 89 | crossfire(55), isolated(25) |
+| Mirage | 85 | crossfire(55), isolated(23) |
 
 ---
 
@@ -149,11 +173,9 @@ Sacrilege_Engine/
 
 > *"The truth hurts. Sacrilege delivers it anyway."*
 
-Traditional demo review shows you *what* happened. Sacrilege tells you *why* — and assigns blame. Every isolated death, every missed trade, every stupid peek gets catalogued and scored.
+Traditional demo review shows you *what* happened. Sacrilege tells you *why* — and assigns blame.
 
 **This isn't validation software. It's accountability software.**
-
-Players who improve fastest are those who confront their mistakes honestly. Sacrilege makes that confrontation unavoidable.
 
 ---
 
@@ -168,9 +190,7 @@ Players who improve fastest are those who confront their mistakes honestly. Sacr
 
 ## 📜 License
 
-**Proprietary Commercial License**
-
-© 2026 Pl4yer-ONE. All rights reserved. See [LICENSE](LICENSE) for details.
+**Proprietary Commercial License** — © 2026 Pl4yer-ONE
 
 ---
 
@@ -179,9 +199,5 @@ Players who improve fastest are those who confront their mistakes honestly. Sacr
 **Built for players who want the truth.**
 
 *Not the comfortable version.*
-
-<br>
-
-[![GitHub](https://img.shields.io/badge/GitHub-Pl4yer--ONE-181717?style=flat-square&logo=github)](https://github.com/Pl4yer-ONE)
 
 </div>

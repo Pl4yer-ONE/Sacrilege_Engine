@@ -387,26 +387,22 @@ class RadarReplayer:
         # Kill feed and death analysis
         round_start = next((s for s, e, n in self.rounds if n == self.current_round), 0)
         
-        # Track which kills we've counted this frame
+        # Process kills in this round
         for kt, kills in self.kills_by_tick.items():
             if round_start <= kt <= tick:
                 for k in kills:
                     kill_id = f"{kt}_{k['victim']}"
                     
-                    # Only count each kill once
+                    # Only process each kill once
                     if kill_id not in self.analyzed_kills:
                         self.analyzed_kills.add(kill_id)
                         
-                        # Add to recent kills list for display
+                        # Add to recent kills for display
                         self.recent_kills.append(k)
                         
                         # Count round kills
                         team = k['attacker_team']
                         self.round_kills[team] = self.round_kills.get(team, 0) + 1
-                        
-                        # Track for rankings
-                        if self.death_analyzer:
-                            self.death_analyzer.update_kill(k['attacker'], k['attacker_team'])
                         
                         # Add kill animation
                         if k.get('victim_pos'):
@@ -417,14 +413,13 @@ class RadarReplayer:
                                 'hs': k['hs'],
                             })
                         
-                        # Analyze death
-                        kill_id = f"{kt}_{k['victim']}"
-                        if self.death_analyzer and kill_id not in self.analyzed_kills:
-                            self.analyzed_kills.add(kill_id)
+                        # DEATH ANALYSIS
+                        if self.death_analyzer:
+                            # Track kill for rankings
+                            self.death_analyzer.update_kill(k['attacker'], k['attacker_team'])
                             
-                            # Get players at tick BEFORE death for accurate positions
-                            # The victim should still be alive at this point
-                            pre_kill_tick = max(0, kt - 8)  # ~0.125 seconds before
+                            # Get players at tick BEFORE death
+                            pre_kill_tick = max(0, kt - 8)
                             players = self._get_players_for_analysis(pre_kill_tick, k['victim'])
                             
                             # Find victim's team
@@ -436,6 +431,7 @@ class RadarReplayer:
                             k['victim_team'] = victim_team
                             k['victim_id'] = ''
                             
+                            # Analyze the death
                             analysis = self.death_analyzer.analyze_death(
                                 k, players, self.smokes, self.mollies, 
                                 self.flashes, self.recent_kills, kt, self.current_round
@@ -867,6 +863,8 @@ class RadarReplayer:
         pygame.draw.line(self.screen, color, (x + 5, y - 5), (x - 5, y + 5), 2)
     
     def _draw_killfeed(self):
+        from src.intelligence.death_analyzer import DeathAnalyzer
+        
         kx, ky = self.width - 285, 115
         kw = 270
         
@@ -874,104 +872,84 @@ class RadarReplayer:
         self.screen.blit(self.font_sm.render("KILL FEED", True, Theme.GRAY), (kx, ky))
         
         ky += 20
-        for i, k in enumerate(self.recent_kills[-6:]):
-            y = ky + i * 25
+        for i, k in enumerate(self.recent_kills[-5:]):
+            y = ky + i * 30
             
             # Kill row background
-            pygame.draw.rect(self.screen, (0, 0, 0, 120), (kx, y, kw, 22), border_radius=3)
+            pygame.draw.rect(self.screen, (0, 0, 0, 120), (kx, y, kw, 28), border_radius=3)
             
             # Attacker
             kc = Theme.CT if k['attacker_team'] == 'CT' else Theme.T
-            self.screen.blit(self.font_sm.render(k['attacker'][:10], True, kc), (kx + 5, y + 4))
+            self.screen.blit(self.font_sm.render(k['attacker'][:8], True, kc), (kx + 5, y + 2))
             
-            # Weapon
-            weapon = f"[{k['weapon'][:8]}]"
-            self.screen.blit(self.font_xs.render(weapon, True, Theme.MUTED), (kx + 95, y + 5))
-            
-            # Headshot indicator
-            hs = "●" if k['hs'] else ""
+            # Weapon + HS
+            hs = "HS" if k['hs'] else ""
+            weapon = f"[{k['weapon'][:6]}]{hs}"
+            self.screen.blit(self.font_xs.render(weapon, True, Theme.MUTED), (kx + 80, y + 4))
             
             # Victim
-            self.screen.blit(self.font_sm.render(k['victim'][:10] + hs, True, Theme.DANGER), (kx + 168, y + 4))
+            vc = Theme.CT if k.get('victim_team', 'T') == 'CT' else Theme.T
+            self.screen.blit(self.font_sm.render(k['victim'][:8], True, Theme.DANGER), (kx + 155, y + 2))
+            
+            # Death reason - find matching analysis
+            reason = ""
+            if self.death_analyzer:
+                for analysis in self.death_analyzer.round_deaths:
+                    if analysis.victim_name == k['victim']:
+                        primary = analysis.primary_mistake()
+                        label = DeathAnalyzer.get_mistake_label(primary)
+                        color = DeathAnalyzer.get_mistake_color(primary)
+                        self.screen.blit(self.font_xs.render(label, True, color), (kx + 5, y + 15))
+                        break
     
     def _draw_round_stats(self, players):
         sx, sy = self.width - 295, 310
-        sw, sh = 280, 280
+        sw, sh = 280, 180  # Reduced height
         
         pygame.draw.rect(self.screen, Theme.PANEL, (sx - 5, sy, sw + 10, sh), border_radius=6)
         
-        # Header - LARGER
-        self.screen.blit(self.font_lg.render("LIVE STATISTICS", True, Theme.ACCENT), (sx + 5, sy + 10))
-        pygame.draw.line(self.screen, Theme.BORDER, (sx, sy + 38), (sx + sw, sy + 38), 1)
+        # Header
+        self.screen.blit(self.font_lg.render("LIVE STATISTICS", True, Theme.ACCENT), (sx + 5, sy + 8))
+        pygame.draw.line(self.screen, Theme.BORDER, (sx, sy + 34), (sx + sw, sy + 34), 1)
         
-        row_h = 28
-        cy = sy + 48
+        cy = sy + 42
         
-        # Round Kills - LARGER FONT
-        self.screen.blit(self.font_lg.render("Round Kills", True, Theme.WHITE), (sx + 5, cy))
+        # Round Kills
+        self.screen.blit(self.font_md.render("Round Kills", True, Theme.WHITE), (sx + 5, cy))
         ct_k = str(self.round_kills.get('CT', 0))
         t_k = str(self.round_kills.get('T', 0))
-        self.screen.blit(self.font_lg.render(ct_k, True, Theme.CT), (sx + 150, cy))
-        self.screen.blit(self.font_lg.render(":", True, Theme.GRAY), (sx + 180, cy))
-        self.screen.blit(self.font_lg.render(t_k, True, Theme.T), (sx + 200, cy))
-        cy += row_h + 5
+        self.screen.blit(self.font_lg.render(ct_k, True, Theme.CT), (sx + 140, cy - 2))
+        self.screen.blit(self.font_md.render(":", True, Theme.GRAY), (sx + 170, cy))
+        self.screen.blit(self.font_lg.render(t_k, True, Theme.T), (sx + 190, cy - 2))
+        cy += 28
         
-        # Team HP - LARGER FONT
+        # Team HP with bars
         ct_hp = sum(p['hp'] for p in players if p['team'] == 'CT' and p['alive'])
         t_hp = sum(p['hp'] for p in players if p['team'] == 'T' and p['alive'])
-        self.screen.blit(self.font_lg.render("Team HP", True, Theme.WHITE), (sx + 5, cy))
-        self.screen.blit(self.font_lg.render(str(ct_hp), True, Theme.CT), (sx + 140, cy))
-        self.screen.blit(self.font_lg.render(":", True, Theme.GRAY), (sx + 180, cy))
-        self.screen.blit(self.font_lg.render(str(t_hp), True, Theme.T), (sx + 200, cy))
-        cy += row_h + 5
+        self.screen.blit(self.font_md.render("Team HP", True, Theme.WHITE), (sx + 5, cy))
+        self.screen.blit(self.font_md.render(str(ct_hp), True, Theme.CT), (sx + 140, cy))
+        self.screen.blit(self.font_md.render(":", True, Theme.GRAY), (sx + 170, cy))
+        self.screen.blit(self.font_md.render(str(t_hp), True, Theme.T), (sx + 190, cy))
+        cy += 28
         
-        # HP Bars - LARGER
-        bar_w = 100
-        pygame.draw.rect(self.screen, Theme.MUTED, (sx + 5, cy, bar_w, 12), border_radius=6)
-        ct_hp_pct = min(1, ct_hp / 500)
-        pygame.draw.rect(self.screen, Theme.CT, (sx + 5, cy, int(bar_w * ct_hp_pct), 12), border_radius=6)
-        
-        pygame.draw.rect(self.screen, Theme.MUTED, (sx + 130, cy, bar_w, 12), border_radius=6)
-        t_hp_pct = min(1, t_hp / 500)
-        pygame.draw.rect(self.screen, Theme.T, (sx + 130, cy, int(bar_w * t_hp_pct), 12), border_radius=6)
-        cy += 25
-        
-        # Equipment Value - LARGER
+        # Equipment
         ct_eq = sum(p['equip'] for p in players if p['team'] == 'CT' and p['alive'])
         t_eq = sum(p['equip'] for p in players if p['team'] == 'T' and p['alive'])
-        self.screen.blit(self.font_lg.render("Equipment", True, Theme.WHITE), (sx + 5, cy))
-        self.screen.blit(self.font_md.render(f"${ct_eq}", True, Theme.CT), (sx + 130, cy + 2))
-        self.screen.blit(self.font_md.render(f"${t_eq}", True, Theme.T), (sx + 200, cy + 2))
-        cy += row_h + 5
+        self.screen.blit(self.font_md.render("Equipment", True, Theme.WHITE), (sx + 5, cy))
+        self.screen.blit(self.font_sm.render(f"${ct_eq}", True, Theme.CT), (sx + 130, cy + 2))
+        self.screen.blit(self.font_sm.render(f"${t_eq}", True, Theme.T), (sx + 200, cy + 2))
+        cy += 28
         
-        pygame.draw.line(self.screen, Theme.BORDER, (sx, cy), (sx + sw, cy), 1)
-        cy += 12
-        
-        # LIVE UTILITY COUNTS
-        self.screen.blit(self.font_lg.render("Active Utility", True, Theme.ACCENT2), (sx + 5, cy))
-        cy += 26
-        
+        # Active Utility
         tick = self.all_ticks[self.tick_idx] if self.all_ticks else 0
         active_smokes = sum(1 for s in self.smokes if s['start'] <= tick <= s['end'])
         active_mollies = sum(1 for m in self.mollies if m['start'] <= tick <= m['end'])
         
-        # Smoke count
-        pygame.draw.circle(self.screen, Theme.SMOKE, (sx + 15, cy + 8), 8)
-        self.screen.blit(self.font_lg.render(f"{active_smokes} Smokes", True, Theme.WHITE), (sx + 30, cy))
-        cy += 24
-        
-        # Fire count
-        pygame.draw.circle(self.screen, Theme.FIRE, (sx + 15, cy + 8), 8)
-        self.screen.blit(self.font_lg.render(f"{active_mollies} Fires", True, Theme.WHITE), (sx + 30, cy))
-        cy += 30
-        
-        # MATCH INFO
-        pygame.draw.line(self.screen, Theme.BORDER, (sx, cy), (sx + sw, cy), 1)
-        cy += 12
-        self.screen.blit(self.font_md.render(f"Round {self.current_round} of {len(self.rounds)}", True, Theme.GRAY), (sx + 5, cy))
-        cy += 20
-        total_kills = sum(len(k) for k in self.kills_by_tick.values())
-        self.screen.blit(self.font_md.render(f"Total Kills: {total_kills}", True, Theme.GRAY), (sx + 5, cy))
+        self.screen.blit(self.font_md.render("Active Utility", True, Theme.ACCENT2), (sx + 5, cy))
+        pygame.draw.circle(self.screen, Theme.SMOKE, (sx + 140, cy + 8), 6)
+        self.screen.blit(self.font_sm.render(f"{active_smokes}", True, Theme.WHITE), (sx + 152, cy + 2))
+        pygame.draw.circle(self.screen, Theme.FIRE, (sx + 185, cy + 8), 6)
+        self.screen.blit(self.font_sm.render(f"{active_mollies}", True, Theme.WHITE), (sx + 197, cy + 2))
     
     def _draw_timeline(self, tick):
         ty = self.height - 48
@@ -1031,53 +1009,74 @@ class RadarReplayer:
             time_left = expire_tick - tick
             alpha = min(255, int(time_left * 0.8))
             
-            # Get primary mistake
             if analysis.mistakes:
                 mistake = analysis.mistakes[0]
                 color = DeathAnalyzer.get_mistake_color(mistake)
                 
-                # Draw popup box
-                box_w = 160
-                box_h = 50 + len(analysis.reasons) * 18
+                # Draw larger popup box with full analytics
+                box_w = 200
+                box_h = 120
                 box_x = min(x + 15, rx + self.radar_size - box_w - 10)
                 box_y = max(y - box_h // 2, ry + 10)
                 
                 # Background
                 surf = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-                pygame.draw.rect(surf, (20, 24, 32, min(220, alpha)), (0, 0, box_w, box_h), border_radius=6)
-                pygame.draw.rect(surf, (*color, min(180, alpha)), (0, 0, 4, box_h), border_top_left_radius=6, border_bottom_left_radius=6)
-                
+                pygame.draw.rect(surf, (20, 24, 32, min(230, alpha)), (0, 0, box_w, box_h), border_radius=8)
+                pygame.draw.rect(surf, (*color, min(200, alpha)), (0, 0, 5, box_h), border_top_left_radius=8, border_bottom_left_radius=8)
                 self.screen.blit(surf, (box_x, box_y))
                 
-                # Header - victim name
+                # Header - victim name + killer
                 name_color = Theme.CT if analysis.victim_team == 'CT' else Theme.T
-                self.screen.blit(self.font_md.render(analysis.victim_name, True, name_color), (box_x + 10, box_y + 6))
+                self.screen.blit(self.font_md.render(f"{analysis.victim_name}", True, name_color), (box_x + 12, box_y + 6))
+                self.screen.blit(self.font_xs.render(f"killed by {analysis.attacker_name}", True, Theme.MUTED), (box_x + 12, box_y + 24))
                 
-                # Severity indicator
-                severity_colors = [(100, 200, 100), (200, 200, 100), (255, 180, 50), (255, 100, 50), (255, 50, 50)]
-                sev_color = severity_colors[min(analysis.severity - 1, 4)]
-                pygame.draw.rect(self.screen, sev_color, (box_x + box_w - 30, box_y + 8, 20, 14), border_radius=3)
-                self.screen.blit(self.font_xs.render(str(analysis.severity), True, Theme.WHITE), (box_x + box_w - 24, box_y + 9))
+                # Severity badge
+                sev_colors = [(100, 200, 100), (150, 200, 100), (255, 200, 50), (255, 120, 50), (255, 50, 50)]
+                sev_color = sev_colors[min(analysis.severity - 1, 4)]
+                pygame.draw.rect(self.screen, sev_color, (box_x + box_w - 28, box_y + 8, 22, 16), border_radius=4)
+                self.screen.blit(self.font_sm.render(str(analysis.severity), True, (0, 0, 0)), (box_x + box_w - 21, box_y + 10))
                 
-                # Reasons
-                for i, reason in enumerate(analysis.reasons[:3]):
-                    self.screen.blit(self.font_sm.render(f"• {reason[:25]}", True, Theme.WHITE), (box_x + 10, box_y + 26 + i * 18))
+                # Primary mistake label
+                label = DeathAnalyzer.get_mistake_label(mistake)
+                self.screen.blit(self.font_lg.render(label, True, color), (box_x + 12, box_y + 40))
+                
+                # Stats row 1: Teammates + Enemies
+                cy = box_y + 65
+                tm_dist = f"{int(analysis.teammate_distance)}u" if analysis.teammate_distance < 9000 else "ALONE"
+                self.screen.blit(self.font_xs.render(f"Team: {tm_dist}", True, Theme.GRAY), (box_x + 12, cy))
+                self.screen.blit(self.font_xs.render(f"vs {analysis.enemy_count} enemies", True, Theme.GRAY), (box_x + 110, cy))
+                
+                # Stats row 2: Trade + Blame
+                cy += 16
+                trade = "TRADED" if analysis.was_traded else "NOT TRADED"
+                trade_color = Theme.SUCCESS if analysis.was_traded else Theme.DANGER
+                self.screen.blit(self.font_xs.render(trade, True, trade_color), (box_x + 12, cy))
+                
+                blame = analysis.blame_score()
+                blame_color = (100, 200, 100) if blame < 40 else (255, 180, 50) if blame < 60 else (255, 80, 80)
+                self.screen.blit(self.font_xs.render(f"Blame: {blame:.0f}%", True, blame_color), (box_x + 110, cy))
+                
+                # Additional mistakes
+                cy += 16
+                if len(analysis.mistakes) > 1:
+                    other = ", ".join([DeathAnalyzer.get_mistake_label(m) for m in analysis.mistakes[1:3]])
+                    self.screen.blit(self.font_xs.render(f"+{other}", True, Theme.MUTED), (box_x + 12, cy))
                 
                 # Line to death position
                 pygame.draw.line(self.screen, (*color, min(150, alpha)), (x, y), (box_x, box_y + box_h // 2), 2)
     
     def _draw_death_panel(self):
-        """Draw the BRUTAL death analysis and rankings panel."""
+        """Draw the Live Rankings panel."""
         if not self.death_analyzer:
             return
         
         from src.intelligence.death_analyzer import DeathAnalyzer
         
-        # Panel position
+        # Panel position - below stats panel
         px = self.width - 295
         py = 500
         pw = 280
-        ph = 340
+        ph = 200
         
         pygame.draw.rect(self.screen, Theme.PANEL, (px - 5, py, pw + 10, ph), border_radius=6)
         
@@ -1088,75 +1087,38 @@ class RadarReplayer:
         rankings = self.death_analyzer.get_rankings()
         cy = py + 42
         
-        for i, stats in enumerate(rankings[:6]):
+        # Show top 8 players
+        for i, stats in enumerate(rankings[:8]):
             # Rank number
-            self.screen.blit(self.font_md.render(f"#{i+1}", True, Theme.MUTED), (px + 5, cy))
+            self.screen.blit(self.font_sm.render(f"#{i+1}", True, Theme.MUTED), (px + 5, cy))
             
             # Grade badge
             grade = stats.rank_grade
             grade_color = DeathAnalyzer.get_grade_color(grade)
-            pygame.draw.rect(self.screen, grade_color, (px + 30, cy + 1, 20, 16), border_radius=3)
-            self.screen.blit(self.font_sm.render(grade, True, (0, 0, 0)), (px + 36, cy + 2))
+            pygame.draw.rect(self.screen, grade_color, (px + 28, cy + 1, 18, 14), border_radius=3)
+            self.screen.blit(self.font_xs.render(grade, True, (0, 0, 0)), (px + 33, cy + 2))
             
             # Name
             name_color = Theme.CT if stats.team == 'CT' else Theme.T
-            self.screen.blit(self.font_md.render(stats.name[:10], True, name_color), (px + 55, cy))
+            self.screen.blit(self.font_sm.render(stats.name[:9], True, name_color), (px + 50, cy))
             
             # K/D
             kd = f"{stats.kills}/{stats.deaths}"
-            self.screen.blit(self.font_sm.render(kd, True, Theme.WHITE), (px + 145, cy + 2))
+            self.screen.blit(self.font_sm.render(kd, True, Theme.WHITE), (px + 140, cy))
             
             # Blame score
             blame = stats.avg_blame
             blame_color = (100, 200, 100) if blame < 40 else (255, 180, 50) if blame < 60 else (255, 80, 80)
-            self.screen.blit(self.font_sm.render(f"{blame:.0f}%", True, blame_color), (px + 190, cy + 2))
+            self.screen.blit(self.font_xs.render(f"{blame:.0f}%", True, blame_color), (px + 185, cy + 1))
             
             # Performance bar
             perf = min(100, stats.performance_score)
-            bar_w = int(40 * perf / 100)
-            pygame.draw.rect(self.screen, Theme.MUTED, (px + 230, cy + 4, 40, 10), border_radius=2)
+            bar_w = int(35 * perf / 100)
+            pygame.draw.rect(self.screen, Theme.MUTED, (px + 220, cy + 3, 35, 8), border_radius=2)
             if bar_w > 0:
-                pygame.draw.rect(self.screen, grade_color, (px + 230, cy + 4, bar_w, 10), border_radius=2)
+                pygame.draw.rect(self.screen, grade_color, (px + 220, cy + 3, bar_w, 8), border_radius=2)
             
-            cy += 22
-        
-        # === RECENT DEATHS ===
-        py2 = py + 180
-        pygame.draw.line(self.screen, Theme.BORDER, (px, py2), (px + pw, py2), 1)
-        self.screen.blit(self.font_lg.render("RECENT DEATHS", True, (255, 100, 100)), (px + 5, py2 + 8))
-        
-        cy = py2 + 32
-        for analysis in reversed(self.death_analyzer.round_deaths[-4:]):
-            # Name
-            name_color = Theme.CT if analysis.victim_team == 'CT' else Theme.T
-            self.screen.blit(self.font_sm.render(analysis.victim_name[:10], True, name_color), (px + 5, cy))
-            
-            # Severity badge
-            sev_colors = [(100, 200, 100), (200, 200, 100), (255, 180, 50), (255, 100, 50), (255, 50, 50)]
-            sev_color = sev_colors[min(analysis.severity - 1, 4)]
-            pygame.draw.rect(self.screen, sev_color, (px + 85, cy, 16, 14), border_radius=2)
-            self.screen.blit(self.font_xs.render(str(analysis.severity), True, Theme.WHITE), (px + 90, cy + 1))
-            
-            # Primary mistake
-            primary = analysis.primary_mistake()
-            label = DeathAnalyzer.get_mistake_label(primary)
-            color = DeathAnalyzer.get_mistake_color(primary)
-            self.screen.blit(self.font_sm.render(label[:12], True, color), (px + 108, cy))
-            
-            # Blame
-            blame = analysis.blame_score()
-            self.screen.blit(self.font_xs.render(f"{blame:.0f}%", True, Theme.MUTED), (px + 200, cy + 2))
-            
-            cy += 20
-        
-        # === ROUND SUMMARY ===
-        if self.death_analyzer.round_deaths:
-            summary = self.death_analyzer.get_round_summary()
-            cy = py + ph - 30
-            pygame.draw.line(self.screen, Theme.BORDER, (px, cy - 8), (px + pw, cy - 8), 1)
-            
-            self.screen.blit(self.font_sm.render(f"Round: {summary['total']} deaths", True, Theme.GRAY), (px + 5, cy))
-            self.screen.blit(self.font_sm.render(f"Avg Blame: {summary['avg_blame']:.0f}%", True, Theme.MUTED), (px + 130, cy))
+            cy += 18
 
     def _draw_legend(self):
         ly = self.height - 22
