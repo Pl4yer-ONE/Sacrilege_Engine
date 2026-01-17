@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="background-color:#050505; image-rendering: pixelated;">
+  <defs>
+    <filter id="glitch" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="3" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="10" />
+    </filter>
+  </defs>
+  
+  <!-- Pixel Grid Construction -->
+  <g stroke="none">
+    <!-- Dark Halo / Wings Background -->
+    <path d="M128 128 h32 v32 h-32 z M160 96 h32 v32 h-32 z M192 64 h128 v32 h-128 z M320 96 h32 v32 h-32 z M352 128 h32 v32 h-32 z" fill="#1a1a2e" opacity="0.8"/>
+    <path d="M96 160 h32 v128 h-32 z M384 160 h32 v128 h-32 z" fill="#1a1a2e" opacity="0.6"/>
+    
+    <!-- The "Fallen" Red Core (Sword/Cross/Figure) -->
+    <!-- Vertical beam -->
+    <rect x="240" y="64" width="32" height="384" fill="#ff003c" />
+    <!-- Horizontal Cross beam (broken) -->
+    <rect x="160" y="160" width="192" height="32" fill="#ff003c" />
+    
+    <!-- Glitch / Corruption Pixels (Cyan) -->
+    <rect x="224" y="240" width="16" height="16" fill="#00f3ff" />
+    <rect x="272" y="208" width="16" height="16" fill="#00f3ff" />
+    <rect x="256" y="320" width="32" height="16" fill="#00f3ff" opacity="0.8"/>
+    <rect x="208" y="128" width="16" height="16" fill="#00f3ff" />
+    
+    <!-- "Anime" Eye / Face implication -->
+    <rect x="208" y="192" width="32" height="16" fill="#000" />
+    <rect x="272" y="192" width="32" height="16" fill="#000" />
+    <rect x="216" y="192" width="8" height="8" fill="#ff003c" /> <!-- Left Eye -->
+    <rect x="288" y="192" width="8" height="8" fill="#ff003c" /> <!-- Right Eye -->
+    
+    <!-- Blood / Corruption Drip -->
+    <rect x="248" y="448" width="16" height="32" fill="#a00028" />
+    <rect x="264" y="464" width="16" height="16" fill="#a00028" />
+    
+    <!-- Scattered Glitch Pixels -->
+    <rect x="100" y="300" width="16" height="16" fill="#00f3ff" opacity="0.5"/>
+    <rect x="400" y="100" width="16" height="16" fill="#ff003c" opacity="0.5"/>
+    <rect x="350" y="400" width="16" height="16" fill="#00f3ff" opacity="0.5"/>
+    
+    <!-- Scanlines mockup -->
+    <path d="M0 0 h512 v2 h-512 z" fill="#ffffff" opacity="0.05" />
+    <path d="M0 4 h512 v2 h-512 z" fill="#ffffff" opacity="0.05" />
+    <!-- ... repeated scanlines would be too much code, skipping for simplicity -->
+  </g>
+  
+  <!-- Overlay Effect -->
+  <rect width="512" height="512" fill="none" stroke="#333" stroke-width="8" />
+</svg>
