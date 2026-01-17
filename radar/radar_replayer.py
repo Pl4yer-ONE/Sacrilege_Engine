@@ -380,20 +380,32 @@ class RadarReplayer:
             self.round_kills = {'CT': 0, 'T': 0}
             self.recent_kills.clear()
             self.kill_animations.clear()
+            self.analyzed_kills.clear()  # Reset for new round
+            if self.death_analyzer:
+                self.death_analyzer.reset_round()
         
         # Kill feed and death analysis
         round_start = next((s for s, e, n in self.rounds if n == self.current_round), 0)
+        
+        # Track which kills we've counted this frame
         for kt, kills in self.kills_by_tick.items():
             if round_start <= kt <= tick:
                 for k in kills:
-                    if k not in self.recent_kills:
+                    kill_id = f"{kt}_{k['victim']}"
+                    
+                    # Only count each kill once
+                    if kill_id not in self.analyzed_kills:
+                        self.analyzed_kills.add(kill_id)
+                        
+                        # Add to recent kills list for display
                         self.recent_kills.append(k)
+                        
+                        # Count round kills
                         team = k['attacker_team']
                         self.round_kills[team] = self.round_kills.get(team, 0) + 1
                         
-                        # Track kill for rankings (only if not already processed)
-                        kill_id = f"{kt}_{k['victim']}"
-                        if self.death_analyzer and kill_id not in self.analyzed_kills:
+                        # Track for rankings
+                        if self.death_analyzer:
                             self.death_analyzer.update_kill(k['attacker'], k['attacker_team'])
                         
                         # Add kill animation

@@ -319,6 +319,11 @@ class DeathAnalyzer:
         key = primary.value
         stats.mistake_counts[key] = stats.mistake_counts.get(key, 0) + 1
     
+    def reset_round(self):
+        """Reset round-specific tracking."""
+        self.round_deaths = []
+        self.round_death_order = 0
+    
     def update_kill(self, attacker_name: str, team: str):
         """Record a kill for ranking."""
         if attacker_name not in self.player_stats:
