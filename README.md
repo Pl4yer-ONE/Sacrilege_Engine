@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/logo_v2.png" alt="Sacrilege Engine Logo" width="200"/>
-
 # SACRILEGE ENGINE
 
 ### *The Unforgiving CS2 Demo Intelligence System*
