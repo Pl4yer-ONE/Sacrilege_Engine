@@ -25,7 +25,12 @@ dependencies = [
     "structlog>=24.1.0",
     "python-multipart>=0.0.6",
     "aiofiles>=23.2.0",
+    "mcp>=1.0.0",
+    "pygame>=2.5.0",
 ]
+
+[project.scripts]
+sacrilege-mcp = "src.mcp_server:main"
 
 [project.optional-dependencies]
 dev = [
