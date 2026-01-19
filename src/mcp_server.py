@@ -17,7 +17,6 @@ from mcp.types import (
     Tool,
     TextContent,
     Resource,
-    ResourceTemplate,
 )
 
 # Initialize MCP server
@@ -40,6 +39,83 @@ def get_demo_path(demo_name: str) -> Path:
         if demo_path.exists():
             return demo_path
     raise FileNotFoundError(f"Demo not found: {demo_name}")
+
+
+def parse_demo(demo_path: Path) -> dict:
+    """Parse demo file and return structured data."""
+    from demoparser2 import DemoParser
+    import pandas as pd
+    
+    parser = DemoParser(str(demo_path))
+    
+    # Get header info
+    header = parser.parse_header()
+    map_name = header.get('map_name', 'unknown')
+    
+    # Parse kills
+    kills_df = parser.parse_event("player_death", other=["total_rounds_played"])
+    
+    # Parse player positions
+    tick_fields = ["X", "Y", "Z", "health", "armor_value", "is_alive", "team_num"]
+    tick_df = parser.parse_ticks(tick_fields)
+    
+    # Convert kills to list of dicts
+    kills = []
+    for _, row in kills_df.iterrows():
+        kills.append({
+            'tick': int(row.get('tick', 0)),
+            'round': int(row.get('total_rounds_played', 0)) + 1,
+            'attacker': row.get('attacker_name', ''),
+            'attacker_steamid': row.get('attacker_steamid', ''),
+            'attacker_team': 'CT' if row.get('attacker_steamid', '') in get_ct_steamids(tick_df, row.get('tick', 0)) else 'T',
+            'victim': row.get('user_name', ''),
+            'victim_steamid': row.get('user_steamid', ''),
+            'weapon': row.get('weapon', ''),
+            'headshot': bool(row.get('headshot', False)),
+            'distance': float(row.get('distance', 0)),
+        })
+    
+    return {
+        'map': map_name,
+        'kills': kills,
+        'tick_df': tick_df,
+    }
+
+
+def get_ct_steamids(tick_df, tick: int) -> set:
+    """Get CT team steamids at a specific tick."""
+    try:
+        data = tick_df[tick_df['tick'] == tick]
+        ct_ids = set()
+        for _, row in data.iterrows():
+            if row.get('team_num', 0) == 3:  # CT team
+                ct_ids.add(str(row.get('steamid', '')))
+        return ct_ids
+    except:
+        return set()
+
+
+def get_players_at_tick(tick_df, tick: int) -> list:
+    """Get player data at a specific tick."""
+    try:
+        data = tick_df[tick_df['tick'] == tick]
+        players = []
+        for _, row in data.iterrows():
+            team_num = row.get('team_num', 0)
+            team = 'CT' if team_num == 3 else 'T' if team_num == 2 else 'SPEC'
+            players.append({
+                'steamid': str(row.get('steamid', '')),
+                'name': row.get('name', ''),
+                'team': team,
+                'x': float(row.get('X', 0)),
+                'y': float(row.get('Y', 0)),
+                'z': float(row.get('Z', 0)),
+                'health': int(row.get('health', 0)),
+                'alive': bool(row.get('is_alive', False)),
+            })
+        return players
+    except:
+        return []
 
 
 @server.list_tools()
@@ -166,7 +242,6 @@ async def handle_list_demos(arguments: dict) -> list[TextContent]:
             {
                 "name": d.name,
                 "size_mb": round(d.stat().st_size / (1024 * 1024), 1),
-                "path": str(d)
             }
             for d in sorted(demos)
         ]
@@ -181,39 +256,55 @@ async def handle_analyze_demo(arguments: dict) -> list[TextContent]:
         demo_path = get_demo_path(arguments["demo_path"])
         max_rounds = arguments.get("max_rounds", 0)
     except FileNotFoundError as e:
-        return [TextContent(type="text", text=str(e))]
-    
-    # Import here to avoid loading unless needed
-    from src.parser.demo_parser import DemoParser
-    from src.intelligence.death_analyzer import DeathAnalyzer
+        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
     
     try:
+        from src.intelligence.death_analyzer import DeathAnalyzer
+        
         # Parse demo
-        parser = DemoParser()
-        demo_data = parser.parse(str(demo_path))
+        demo_data = parse_demo(demo_path)
         
         # Initialize analyzer
         analyzer = DeathAnalyzer()
         
-        # Process all kills
+        # Process kills
         deaths_analyzed = []
-        for kill in demo_data.get('kills', []):
-            # Get players at kill tick
-            tick = kill.get('tick', 0)
-            players = demo_data.get('players_at_tick', {}).get(tick, [])
+        for kill in demo_data['kills']:
+            if max_rounds > 0 and kill['round'] > max_rounds:
+                break
             
+            # Get players at kill tick
+            tick = kill['tick']
+            players = get_players_at_tick(demo_data['tick_df'], tick)
+            
+            # Build kill dict for analyzer
+            kill_data = {
+                'attacker': kill['attacker'],
+                'attacker_team': kill['attacker_team'],
+                'victim': kill['victim'],
+                'victim_team': 'CT' if kill['attacker_team'] == 'T' else 'T',
+                'victim_id': kill['victim_steamid'],
+                'weapon': kill['weapon'],
+                'hs': kill['headshot'],
+            }
+            
+            # Get victim position
+            for p in players:
+                if p['name'] == kill['victim']:
+                    kill_data['victim_pos'] = type('Pos', (), {'x': p['x'], 'y': p['y']})()
+                    break
+            
+            # Analyze death
             analysis = analyzer.analyze_death(
-                kill, players, 
-                demo_data.get('smokes', []),
-                demo_data.get('mollies', []),
-                demo_data.get('flashes', []),
-                [], tick, kill.get('round', 1)
+                kill_data, players, [], [], [], [], tick, kill['round']
             )
             
             deaths_analyzed.append({
+                "round": kill['round'],
                 "victim": analysis.victim_name,
                 "attacker": analysis.attacker_name,
-                "round": kill.get('round', 0),
+                "weapon": kill['weapon'],
+                "headshot": kill['headshot'],
                 "primary_mistake": analysis.primary_mistake().value,
                 "all_mistakes": [m.value for m in analysis.mistakes],
                 "blame_score": round(analysis.blame_score(), 1),
@@ -221,23 +312,19 @@ async def handle_analyze_demo(arguments: dict) -> list[TextContent]:
                 "teammate_distance": round(analysis.teammate_distance, 0),
                 "enemy_count": analysis.enemy_count,
                 "was_traded": analysis.was_traded,
-                "reasons": analysis.reasons
             })
-            
-            if max_rounds > 0 and kill.get('round', 0) > max_rounds:
-                break
         
         result = {
             "demo": demo_path.name,
-            "map": demo_data.get('map', 'unknown'),
+            "map": demo_data['map'],
             "total_deaths": len(deaths_analyzed),
-            "deaths": deaths_analyzed
+            "deaths": deaths_analyzed[:50]  # Limit to 50 for response size
         }
         
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
         
     except Exception as e:
-        return [TextContent(type="text", text=f"Analysis error: {str(e)}")]
+        return [TextContent(type="text", text=json.dumps({"error": f"Analysis error: {str(e)}"}))]
 
 
 async def handle_get_rankings(arguments: dict) -> list[TextContent]:
@@ -245,46 +332,53 @@ async def handle_get_rankings(arguments: dict) -> list[TextContent]:
     try:
         demo_path = get_demo_path(arguments["demo_path"])
     except FileNotFoundError as e:
-        return [TextContent(type="text", text=str(e))]
-    
-    from src.parser.demo_parser import DemoParser
-    from src.intelligence.death_analyzer import DeathAnalyzer
+        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
     
     try:
-        parser = DemoParser()
-        demo_data = parser.parse(str(demo_path))
+        from src.intelligence.death_analyzer import DeathAnalyzer
         
+        demo_data = parse_demo(demo_path)
         analyzer = DeathAnalyzer()
         
-        # Process all kills to build stats
-        for kill in demo_data.get('kills', []):
-            tick = kill.get('tick', 0)
-            players = demo_data.get('players_at_tick', {}).get(tick, [])
+        # Process all kills
+        for kill in demo_data['kills']:
+            tick = kill['tick']
+            players = get_players_at_tick(demo_data['tick_df'], tick)
             
-            analyzer.analyze_death(
-                kill, players,
-                demo_data.get('smokes', []),
-                demo_data.get('mollies', []),
-                demo_data.get('flashes', []),
-                [], tick, kill.get('round', 1)
-            )
-            analyzer.update_kill(kill.get('attacker', ''), kill.get('attacker_team', 'T'))
+            kill_data = {
+                'attacker': kill['attacker'],
+                'attacker_team': kill['attacker_team'],
+                'victim': kill['victim'],
+                'victim_team': 'CT' if kill['attacker_team'] == 'T' else 'T',
+                'victim_id': kill['victim_steamid'],
+                'weapon': kill['weapon'],
+                'hs': kill['headshot'],
+            }
+            
+            for p in players:
+                if p['name'] == kill['victim']:
+                    kill_data['victim_pos'] = type('Pos', (), {'x': p['x'], 'y': p['y']})()
+                    break
+            
+            analyzer.analyze_death(kill_data, players, [], [], [], [], tick, kill['round'])
+            analyzer.update_kill(kill['attacker'], kill['attacker_team'])
         
         # Get rankings
         rankings = analyzer.get_rankings()
         
         result = {
             "demo": demo_path.name,
+            "map": demo_data['map'],
             "rankings": [
                 {
                     "rank": i + 1,
                     "player": r.name,
                     "team": r.team,
-                    "grade": r.grade,
-                    "score": round(r.performance_score(), 1),
+                    "grade": r.rank_grade,
+                    "score": round(r.performance_score, 1),
                     "kills": r.kills,
                     "deaths": r.deaths,
-                    "avg_blame": round(r.avg_blame(), 1)
+                    "avg_blame": round(r.avg_blame, 1) if r.deaths > 0 else 0
                 }
                 for i, r in enumerate(rankings)
             ]
@@ -293,61 +387,71 @@ async def handle_get_rankings(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
         
     except Exception as e:
-        return [TextContent(type="text", text=f"Rankings error: {str(e)}")]
+        return [TextContent(type="text", text=json.dumps({"error": f"Rankings error: {str(e)}"}))]
 
 
 async def handle_death_details(arguments: dict) -> list[TextContent]:
     """Get detailed death analysis for a specific player."""
     try:
         demo_path = get_demo_path(arguments["demo_path"])
-        player_name = arguments["player_name"]
+        player_name = arguments["player_name"].lower()
     except (FileNotFoundError, KeyError) as e:
-        return [TextContent(type="text", text=str(e))]
-    
-    from src.parser.demo_parser import DemoParser
-    from src.intelligence.death_analyzer import DeathAnalyzer
+        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
     
     try:
-        parser = DemoParser()
-        demo_data = parser.parse(str(demo_path))
+        from src.intelligence.death_analyzer import DeathAnalyzer
         
+        demo_data = parse_demo(demo_path)
         analyzer = DeathAnalyzer()
         player_deaths = []
         
-        for kill in demo_data.get('kills', []):
-            if kill.get('victim', '').lower() != player_name.lower():
+        for kill in demo_data['kills']:
+            if kill['victim'].lower() != player_name:
                 continue
-                
-            tick = kill.get('tick', 0)
-            players = demo_data.get('players_at_tick', {}).get(tick, [])
             
-            analysis = analyzer.analyze_death(
-                kill, players,
-                demo_data.get('smokes', []),
-                demo_data.get('mollies', []),
-                demo_data.get('flashes', []),
-                [], tick, kill.get('round', 1)
-            )
+            tick = kill['tick']
+            players = get_players_at_tick(demo_data['tick_df'], tick)
+            
+            kill_data = {
+                'attacker': kill['attacker'],
+                'attacker_team': kill['attacker_team'],
+                'victim': kill['victim'],
+                'victim_team': 'CT' if kill['attacker_team'] == 'T' else 'T',
+                'victim_id': kill['victim_steamid'],
+                'weapon': kill['weapon'],
+                'hs': kill['headshot'],
+            }
+            
+            for p in players:
+                if p['name'] == kill['victim']:
+                    kill_data['victim_pos'] = type('Pos', (), {'x': p['x'], 'y': p['y']})()
+                    break
+            
+            analysis = analyzer.analyze_death(kill_data, players, [], [], [], [], tick, kill['round'])
             
             player_deaths.append({
-                "round": kill.get('round', 0),
+                "round": kill['round'],
                 "killed_by": analysis.attacker_name,
-                "weapon": kill.get('weapon', 'unknown'),
+                "weapon": kill['weapon'],
+                "headshot": kill['headshot'],
                 "primary_mistake": analysis.primary_mistake().value,
                 "all_mistakes": [m.value for m in analysis.mistakes],
                 "blame_score": round(analysis.blame_score(), 1),
-                "reasons": analysis.reasons,
                 "teammate_distance": round(analysis.teammate_distance, 0),
                 "was_traded": analysis.was_traded
             })
         
         if not player_deaths:
-            return [TextContent(type="text", text=f"No deaths found for player: {player_name}")]
+            return [TextContent(type="text", text=json.dumps({
+                "error": f"No deaths found for player: {player_name}",
+                "suggestion": "Check player name spelling (case-insensitive)"
+            }))]
         
         avg_blame = sum(d['blame_score'] for d in player_deaths) / len(player_deaths)
         
         result = {
-            "player": player_name,
+            "player": arguments["player_name"],
+            "demo": demo_path.name,
             "total_deaths": len(player_deaths),
             "average_blame": round(avg_blame, 1),
             "deaths": player_deaths
@@ -356,7 +460,7 @@ async def handle_death_details(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
         
     except Exception as e:
-        return [TextContent(type="text", text=f"Death details error: {str(e)}")]
+        return [TextContent(type="text", text=json.dumps({"error": f"Death details error: {str(e)}"}))]
 
 
 async def handle_mistake_summary(arguments: dict) -> list[TextContent]:
@@ -364,30 +468,36 @@ async def handle_mistake_summary(arguments: dict) -> list[TextContent]:
     try:
         demo_path = get_demo_path(arguments["demo_path"])
     except FileNotFoundError as e:
-        return [TextContent(type="text", text=str(e))]
-    
-    from src.parser.demo_parser import DemoParser
-    from src.intelligence.death_analyzer import DeathAnalyzer, MistakeType
+        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
     
     try:
-        parser = DemoParser()
-        demo_data = parser.parse(str(demo_path))
+        from src.intelligence.death_analyzer import DeathAnalyzer
         
+        demo_data = parse_demo(demo_path)
         analyzer = DeathAnalyzer()
         mistake_counts: dict[str, int] = {}
         total_deaths = 0
         
-        for kill in demo_data.get('kills', []):
-            tick = kill.get('tick', 0)
-            players = demo_data.get('players_at_tick', {}).get(tick, [])
+        for kill in demo_data['kills']:
+            tick = kill['tick']
+            players = get_players_at_tick(demo_data['tick_df'], tick)
             
-            analysis = analyzer.analyze_death(
-                kill, players,
-                demo_data.get('smokes', []),
-                demo_data.get('mollies', []),
-                demo_data.get('flashes', []),
-                [], tick, kill.get('round', 1)
-            )
+            kill_data = {
+                'attacker': kill['attacker'],
+                'attacker_team': kill['attacker_team'],
+                'victim': kill['victim'],
+                'victim_team': 'CT' if kill['attacker_team'] == 'T' else 'T',
+                'victim_id': kill['victim_steamid'],
+                'weapon': kill['weapon'],
+                'hs': kill['headshot'],
+            }
+            
+            for p in players:
+                if p['name'] == kill['victim']:
+                    kill_data['victim_pos'] = type('Pos', (), {'x': p['x'], 'y': p['y']})()
+                    break
+            
+            analysis = analyzer.analyze_death(kill_data, players, [], [], [], [], tick, kill['round'])
             
             total_deaths += 1
             for mistake in analysis.mistakes:
@@ -398,12 +508,13 @@ async def handle_mistake_summary(arguments: dict) -> list[TextContent]:
         
         result = {
             "demo": demo_path.name,
+            "map": demo_data['map'],
             "total_deaths": total_deaths,
             "mistake_distribution": [
                 {
                     "type": m,
                     "count": c,
-                    "percentage": round(c / total_deaths * 100, 1)
+                    "percentage": round(c / total_deaths * 100, 1) if total_deaths > 0 else 0
                 }
                 for m, c in sorted_mistakes
             ]
@@ -412,7 +523,7 @@ async def handle_mistake_summary(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
         
     except Exception as e:
-        return [TextContent(type="text", text=f"Mistake summary error: {str(e)}")]
+        return [TextContent(type="text", text=json.dumps({"error": f"Mistake summary error: {str(e)}"}))]
 
 
 @server.list_resources()
