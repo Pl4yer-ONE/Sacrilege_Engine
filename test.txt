@@ -1,8 +1,0 @@
-SACRILEGE ENGINE TEST: 6/6 PASSED
-
-✅ Imports
-✅ Core
-✅ Parser
-✅ 8 Modules
-✅ Decision Graph
-✅ API
