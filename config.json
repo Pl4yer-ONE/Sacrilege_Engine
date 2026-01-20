@@ -1,0 +1,9 @@
+{
+    "playback_speed": 1.0,
+    "show_heatmap": false,
+    "theme": "dark",
+    "window_width": 1500,
+    "window_height": 920,
+    "demo_directory": "demo files",
+    "auto_play": false
+}

@@ -236,6 +236,13 @@ class RadarReplayer:
         self.show_round_summary = False
         self.round_summary_tick = 0
         
+        # New Features v1.4
+        self.show_heatmap = False  # M key toggle
+        self.death_positions = []  # [(x, y, team, round)]
+        self.bookmarks = []  # [(tick, reason, data)]
+        self.selected_player = None  # Clicked player card
+        self.player_detail_mode = False
+        
     def load_demo(self, demo_path: Path) -> bool:
         from demoparser2 import DemoParser as DP2
         from src.parser.demo_parser import DemoParser
@@ -423,6 +430,11 @@ class RadarReplayer:
             pygame.display.toggle_fullscreen()
         elif e.key == pygame.K_j:
             self._export_json()
+        elif e.key == pygame.K_m:
+            self.show_heatmap = not self.show_heatmap
+            print(f"Heatmap: {'ON' if self.show_heatmap else 'OFF'}")
+        elif e.key == pygame.K_b:
+            self._add_bookmark()
     
     def _take_screenshot(self):
         """Save screenshot to Downloads folder."""
@@ -475,6 +487,21 @@ class RadarReplayer:
             json.dump(data, f, indent=2)
         
         print(f"✓ Analysis exported: {filename}")
+    
+    def _add_bookmark(self):
+        """Bookmark current position for later review."""
+        if not self.all_ticks:
+            return
+        
+        tick = self.all_ticks[self.tick_idx]
+        bookmark = {
+            'tick': tick,
+            'tick_idx': self.tick_idx,
+            'round': self.current_round,
+            'timestamp': tick / 64.0,  # Approximate seconds
+        }
+        self.bookmarks.append(bookmark)
+        print(f"✓ Bookmark added: Round {self.current_round}, Tick {tick} (#{len(self.bookmarks)})")
     
     def _next_round(self):
         if not self.all_ticks: return
