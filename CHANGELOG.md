@@ -4,6 +4,29 @@ All notable changes to Sacrilege Engine will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-01-20
+
+### Added
+- **Premium UI Theme** with glassmorphism-inspired design
+- **60+ color definitions** including neon CT/T colors and grade-specific colors
+- **F12 Screenshot** capture (saves to ~/Downloads)
+- **H key** for help overlay toggle
+- **F key** for fullscreen toggle
+- **Unit Tests** for DeathAnalyzer (15 test cases, 100% pass)
+- **UI Helper Functions** for glow effects and rounded rectangles
+
+### Changed
+- Upgraded color scheme with vibrant neon accents
+- Improved controls hint bar with all keybindings
+- Grade colors now distinct: S=Gold, A=Green, B=Blue, C=Silver, D=Orange, F=Red
+
+### Fixed
+- Color overflow bug in animated logo (value exceeded 255)
+- Removed deprecated MCP integration
+
+### Removed
+- MCP server (src/mcp_server.py) - focusing on core functionality
+
 ## [1.2.0] - 2026-01-17
 
 ### Added

@@ -155,30 +155,10 @@ python radar/radar_replayer.py "path/to/demo.dem"
 | `←` `→` | Seek ±5 seconds |
 | `↑` `↓` | Adjust playback speed |
 | `E` `R` | Previous / Next round |
-
-### D. MCP Integration (AI Assistants)
-
-Sacrilege Engine includes an MCP server for integration with **Claude**, **GPT 5.2**, and other AI assistants.
-
-```bash
-# Install MCP
-pip install mcp
-
-# Run MCP server
-PYTHONPATH=. python -m src.mcp_server
-```
-
-**Available Tools:**
-
-| Tool | Description |
-|:-----|:------------|
-| `analyze_demo` | Full death analysis with blame scores |
-| `get_player_rankings` | Player rankings (S-F grades) |
-| `list_demos` | List available demo files |
-| `get_death_details` | Detailed analysis for a specific player |
-| `get_mistake_summary` | Summary of mistake types |
-
-See [docs/MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md) for Claude Desktop setup.
+| `F12` | Save screenshot to Downloads |
+| `H` | Toggle help overlay |
+| `F` | Toggle fullscreen |
+| `HOME` / `END` | Jump to start / end |
 
 ---
 
