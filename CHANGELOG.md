@@ -4,6 +4,22 @@ All notable changes to Sacrilege Engine will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-01-20
+
+### Added
+- **M key** - Heatmap overlay showing death positions
+- **B key** - Bookmark current position for later review
+- **J key** - Export analysis to JSON file
+- **config.json** - User preferences file
+- **Player card click** - Select player by clicking their card
+- **Death position tracking** - For heatmap visualization
+- **Integration tests** - 6 new tests for demo parsing pipeline
+
+### Changed
+- Enhanced _handle_click for player card detection
+- Heatmap renders CT (blue) and T (orange) deaths with glow
+- Timeline is now clickable for seeking
+
 ## [1.3.0] - 2026-01-20
 
 ### Added
