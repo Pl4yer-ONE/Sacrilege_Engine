@@ -527,12 +527,36 @@ class RadarReplayer:
     
     def _handle_click(self, e):
         x, y = e.pos
+        
+        # Player card click (left sidebar)
+        if x < 360:
+            # CT section (approx y = 85 to 320)
+            if 85 <= y <= 320:
+                card_idx = (y - 85) // 47
+                ct_players = [n for n, p in self.players.items() if p.get('team') == 'CT']
+                if 0 <= card_idx < len(ct_players):
+                    self.selected_player = ct_players[card_idx]
+                    print(f"Selected: {self.selected_player}")
+                    return
+            # T section (approx y = 360 to 580)
+            elif 360 <= y <= 580:
+                card_idx = (y - 360) // 47
+                t_players = [n for n, p in self.players.items() if p.get('team') == 'T']
+                if 0 <= card_idx < len(t_players):
+                    self.selected_player = t_players[card_idx]
+                    print(f"Selected: {self.selected_player}")
+                    return
+        
         # Timeline click
         ty = self.height - 42
         tx, tw = 380, self.width - 420
         if ty - 10 <= y <= ty + 30 and tx <= x <= tx + tw and self.all_ticks:
             self.tick_idx = int((x - tx) / tw * (len(self.all_ticks) - 1))
             self._update()
+        
+        # Clear selection on radar click
+        if 375 <= x <= 375 + self.radar_size and 115 <= y <= 115 + self.radar_size:
+            self.selected_player = None
     
     def _update(self):
         if not self.all_ticks: return
