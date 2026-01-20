@@ -344,6 +344,15 @@ class RadarReplayer:
             self.show_help = not getattr(self, 'show_help', False)
         elif e.key == pygame.K_f:
             pygame.display.toggle_fullscreen()
+        elif e.key == pygame.K_o:
+            self._open_demo_file()
+    
+    def _open_demo_file(self):
+        """Open file dialog to load a new demo."""
+        demo_path = open_file_dialog()
+        if demo_path and demo_path.exists():
+            print(f"Loading: {demo_path.name}")
+            self.load_demo(demo_path)
     
     def _take_screenshot(self):
         """Save screenshot to Downloads folder."""
@@ -1164,6 +1173,35 @@ class RadarReplayer:
         self.screen.blit(self.font_md.render(hint, True, Theme.GRAY), (350, ly - 8))
 
 
+def open_file_dialog() -> Optional[Path]:
+    """Open file dialog to select a demo file."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        
+        root = tk.Tk()
+        root.withdraw()  # Hide main window
+        root.attributes('-topmost', True)  # Bring dialog to front
+        
+        file_path = filedialog.askopenfilename(
+            title="Select CS2 Demo File",
+            filetypes=[
+                ("Demo files", "*.dem"),
+                ("All files", "*.*")
+            ],
+            initialdir=Path.home() / "Downloads"
+        )
+        
+        root.destroy()
+        
+        if file_path:
+            return Path(file_path)
+        return None
+    except Exception as e:
+        print(f"File dialog error: {e}")
+        return None
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='SACRILEGE RADAR - CS2 Demo Viewer')
@@ -1172,14 +1210,27 @@ def main():
     
     replayer = RadarReplayer(1500, 920)
     
+    demo_path = None
+    
     if args.demo:
-        replayer.load_demo(Path(args.demo))
+        demo_path = Path(args.demo)
     else:
+        # Try to find demos in default folder
         demo_dir = Path(__file__).parent.parent / 'demo files'
         if demo_dir.exists():
             demos = list(demo_dir.glob('*.dem'))
             if demos:
-                replayer.load_demo(demos[0])
+                demo_path = demos[0]
+        
+        # If no demo found, open file picker
+        if not demo_path:
+            print("No demo specified. Opening file picker...")
+            demo_path = open_file_dialog()
+    
+    if demo_path and demo_path.exists():
+        replayer.load_demo(demo_path)
+    else:
+        print("No demo file selected. Press 'O' to open a demo.")
     
     replayer.run()
 
