@@ -49,39 +49,110 @@ MAP_CONFIGS = {
 
 
 class Theme:
-    """Professional color scheme."""
-    BG = (8, 10, 14)
-    PANEL = (14, 18, 24)
-    CARD = (20, 26, 34)
-    CARD_HOVER = (28, 36, 48)
-    BORDER = (35, 45, 60)
+    """Premium glassmorphism-inspired color scheme."""
+    # Dark backgrounds with depth
+    BG = (6, 8, 12)
+    BG_GRADIENT_TOP = (12, 16, 24)
+    BG_GRADIENT_BOT = (4, 6, 10)
+    PANEL = (12, 16, 22)
+    PANEL_GLASS = (18, 24, 32, 200)  # Semi-transparent
+    CARD = (22, 28, 38)
+    CARD_HOVER = (32, 42, 58)
+    CARD_ACTIVE = (40, 52, 70)
+    BORDER = (45, 55, 75)
+    BORDER_GLOW = (60, 80, 120)
     
-    CT = (75, 150, 255)
-    CT_LIGHT = (120, 180, 255)
-    CT_DARK = (40, 90, 160)
-    T = (255, 180, 50)
-    T_LIGHT = (255, 210, 100)
-    T_DARK = (170, 120, 35)
+    # Team colors - vibrant neon
+    CT = (60, 140, 255)
+    CT_LIGHT = (100, 180, 255)
+    CT_DARK = (30, 80, 180)
+    CT_GLOW = (60, 140, 255, 100)
+    T = (255, 170, 40)
+    T_LIGHT = (255, 200, 90)
+    T_DARK = (180, 110, 25)
+    T_GLOW = (255, 170, 40, 100)
     
-    ACCENT = (0, 200, 255)
-    ACCENT2 = (200, 100, 255)
-    SUCCESS = (60, 210, 110)
-    WARNING = (255, 170, 50)
-    DANGER = (235, 60, 60)
+    # Accent colors - neon
+    ACCENT = (0, 220, 255)
+    ACCENT_GLOW = (0, 200, 255, 80)
+    ACCENT2 = (180, 80, 255)
+    ACCENT2_GLOW = (180, 80, 255, 80)
+    SUCCESS = (50, 230, 120)
+    SUCCESS_GLOW = (50, 230, 120, 80)
+    WARNING = (255, 180, 40)
+    DANGER = (255, 60, 80)
+    DANGER_GLOW = (255, 60, 80, 100)
     
-    WHITE = (240, 245, 255)
-    GRAY = (110, 125, 145)
-    MUTED = (60, 70, 85)
+    # Text
+    WHITE = (245, 248, 255)
+    GRAY = (130, 145, 170)
+    MUTED = (70, 80, 100)
+    DIM = (45, 52, 68)
     
-    SMOKE = (170, 180, 195)
-    FIRE = (255, 95, 35)
-    FLASH = (255, 255, 170)
-    HE = (255, 85, 85)
-    BOMB_GLOW = (255, 50, 50)
+    # Utility effects
+    SMOKE = (160, 175, 200)
+    SMOKE_GLOW = (160, 175, 200, 60)
+    FIRE = (255, 100, 30)
+    FIRE_GLOW = (255, 80, 20, 120)
+    FLASH = (255, 255, 200)
+    FLASH_GLOW = (255, 255, 180, 150)
+    HE = (255, 80, 80)
+    BOMB_GLOW = (255, 40, 40)
+    BOMB_PULSE = (255, 80, 60, 150)
+    
+    # Grades with distinct colors
+    GRADE_S = (255, 215, 0)    # Gold
+    GRADE_A = (100, 255, 150)  # Green
+    GRADE_B = (80, 180, 255)   # Blue
+    GRADE_C = (180, 180, 190)  # Silver
+    GRADE_D = (255, 150, 80)   # Orange
+    GRADE_F = (255, 70, 70)    # Red
+
+# UI Helper functions
+def get_grade_color(grade: str) -> tuple:
+    """Get color for performance grade."""
+    colors = {
+        'S': Theme.GRADE_S,
+        'A': Theme.GRADE_A,
+        'B': Theme.GRADE_B,
+        'C': Theme.GRADE_C,
+        'D': Theme.GRADE_D,
+        'F': Theme.GRADE_F,
+    }
+    return colors.get(grade, Theme.GRAY)
+
+
+def draw_glow_circle(surface, color, center, radius, glow_radius=None):
+    """Draw circle with glow effect."""
+    if glow_radius is None:
+        glow_radius = radius + 8
+    
+    # Create glow surface
+    glow_size = int(glow_radius * 2 + 4)
+    glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+    
+    # Draw multiple rings for glow
+    for i in range(3):
+        alpha = 40 - i * 12
+        r = radius + (glow_radius - radius) * (i + 1) / 3
+        pygame.draw.circle(glow_surf, (*color[:3], alpha), (glow_size//2, glow_size//2), int(r))
+    
+    # Blit glow
+    surface.blit(glow_surf, (center[0] - glow_size//2, center[1] - glow_size//2))
+    
+    # Draw main circle
+    pygame.draw.circle(surface, color, center, radius)
+
+
+def draw_rounded_rect(surface, color, rect, radius=8, border=0, border_color=None):
+    """Draw rounded rectangle with optional border."""
+    pygame.draw.rect(surface, color, rect, border_radius=radius)
+    if border > 0 and border_color:
+        pygame.draw.rect(surface, border_color, rect, width=border, border_radius=radius)
 
 
 class RadarReplayer:
-    """Ultimate CS2 radar replay viewer."""
+    """Ultimate CS2 radar replay viewer with premium UI."""
     
     def __init__(self, width: int = 1500, height: int = 920):
         pygame.init()
@@ -92,12 +163,13 @@ class RadarReplayer:
         self.radar_size = 640
         
         self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
-        pygame.display.set_caption("SACRILEGE RADAR - CS2 Demo Viewer")
+        pygame.display.set_caption("SACRILEGE RADAR - Premium CS2 Demo Viewer")
         
         self.clock = pygame.time.Clock()
         self.frame = 0
         self.fps = 0
         self.fps_timer = 0
+        self.anim_time = 0  # Animation timer
         
         # Fonts with fallbacks - LARGER SIZES
         try:
@@ -112,6 +184,11 @@ class RadarReplayer:
             self.font_md = pygame.font.SysFont('Arial', 16)
             self.font_sm = pygame.font.SysFont('Arial', 14)
             self.font_xs = pygame.font.SysFont('Arial', 11)
+        
+        # UI State
+        self.show_help = False
+        self.hover_player = None
+        self.selected_player = None
         
         # State
         self.demo_data = None
@@ -344,15 +421,6 @@ class RadarReplayer:
             self.show_help = not getattr(self, 'show_help', False)
         elif e.key == pygame.K_f:
             pygame.display.toggle_fullscreen()
-        elif e.key == pygame.K_o:
-            self._open_demo_file()
-    
-    def _open_demo_file(self):
-        """Open file dialog to load a new demo."""
-        demo_path = open_file_dialog()
-        if demo_path and demo_path.exists():
-            print(f"Loading: {demo_path.name}")
-            self.load_demo(demo_path)
     
     def _take_screenshot(self):
         """Save screenshot to Downloads folder."""
@@ -387,12 +455,6 @@ class RadarReplayer:
     
     def _handle_click(self, e):
         x, y = e.pos
-        
-        # Open Demo button (top-left near logo)
-        if 200 <= x <= 330 and 10 <= y <= 42:
-            self._open_demo_file()
-            return
-        
         # Timeline click
         ty = self.height - 42
         tx, tw = 380, self.width - 420
@@ -597,16 +659,6 @@ class RadarReplayer:
         # Subtitle
         sub = self.font_xs.render("CS2 DEMO VIEWER", True, Theme.GRAY)
         self.screen.blit(sub, (18, 38))
-        
-        # Open Demo button
-        btn_rect = pygame.Rect(200, 12, 120, 28)
-        mouse_pos = pygame.mouse.get_pos()
-        is_hover = btn_rect.collidepoint(mouse_pos)
-        btn_color = Theme.CARD_HOVER if is_hover else Theme.CARD
-        pygame.draw.rect(self.screen, btn_color, btn_rect, border_radius=4)
-        pygame.draw.rect(self.screen, Theme.ACCENT, btn_rect, 1, border_radius=4)
-        btn_txt = self.font_sm.render("📂 Open Demo", True, Theme.ACCENT if is_hover else Theme.WHITE)
-        self.screen.blit(btn_txt, (btn_rect.x + 10, btn_rect.y + 6))
         
         # Accent line with gradient effect
         for i in range(3):
@@ -1189,35 +1241,6 @@ class RadarReplayer:
         self.screen.blit(self.font_md.render(hint, True, Theme.GRAY), (350, ly - 8))
 
 
-def open_file_dialog() -> Optional[Path]:
-    """Open file dialog to select a demo file."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        
-        root = tk.Tk()
-        root.withdraw()  # Hide main window
-        root.attributes('-topmost', True)  # Bring dialog to front
-        
-        file_path = filedialog.askopenfilename(
-            title="Select CS2 Demo File",
-            filetypes=[
-                ("Demo files", "*.dem"),
-                ("All files", "*.*")
-            ],
-            initialdir=Path.home() / "Downloads"
-        )
-        
-        root.destroy()
-        
-        if file_path:
-            return Path(file_path)
-        return None
-    except Exception as e:
-        print(f"File dialog error: {e}")
-        return None
-
-
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='SACRILEGE RADAR - CS2 Demo Viewer')
@@ -1226,27 +1249,14 @@ def main():
     
     replayer = RadarReplayer(1500, 920)
     
-    demo_path = None
-    
     if args.demo:
-        demo_path = Path(args.demo)
+        replayer.load_demo(Path(args.demo))
     else:
-        # Try to find demos in default folder
         demo_dir = Path(__file__).parent.parent / 'demo files'
         if demo_dir.exists():
             demos = list(demo_dir.glob('*.dem'))
             if demos:
-                demo_path = demos[0]
-        
-        # If no demo found, open file picker
-        if not demo_path:
-            print("No demo specified. Opening file picker...")
-            demo_path = open_file_dialog()
-    
-    if demo_path and demo_path.exists():
-        replayer.load_demo(demo_path)
-    else:
-        print("No demo file selected. Press 'O' to open a demo.")
+                replayer.load_demo(demos[0])
     
     replayer.run()
 
