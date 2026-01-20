@@ -635,13 +635,21 @@ class RadarReplayer:
                             self.death_popups.append((analysis, kt + 320))
                             
                             # Track death position for heatmap
-                            self.death_positions.append({
-                                'x': analysis.x,
-                                'y': analysis.y,
-                                'team': k['victim_team'],
-                                'round': self.current_round,
-                                'victim': k['victim'],
-                            })
+                            # Get victim's position from players list
+                            victim_pos = None
+                            for p in players:
+                                if p['name'] == k['victim']:
+                                    victim_pos = (p.get('x', 0), p.get('y', 0))
+                                    break
+                            
+                            if victim_pos:
+                                self.death_positions.append({
+                                    'x': victim_pos[0],
+                                    'y': victim_pos[1],
+                                    'team': k['victim_team'],
+                                    'round': self.current_round,
+                                    'victim': k['victim'],
+                                })
         
         # Trim old kills from feed
         self.recent_kills = [k for k in self.recent_kills if tick - k['tick'] < 400]
