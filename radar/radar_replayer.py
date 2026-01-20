@@ -421,6 +421,8 @@ class RadarReplayer:
             self.show_help = not getattr(self, 'show_help', False)
         elif e.key == pygame.K_f:
             pygame.display.toggle_fullscreen()
+        elif e.key == pygame.K_j:
+            self._export_json()
     
     def _take_screenshot(self):
         """Save screenshot to Downloads folder."""
@@ -430,6 +432,49 @@ class RadarReplayer:
         filename = downloads / f"sacrilege_screenshot_{timestamp}.png"
         pygame.image.save(self.screen, str(filename))
         print(f"✓ Screenshot saved: {filename}")
+    
+    def _export_json(self):
+        """Export current analysis to JSON file."""
+        import json
+        from datetime import datetime
+        
+        if not self.death_analyzer:
+            print("✗ No analysis data available")
+            return
+        
+        downloads = Path.home() / "Downloads"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = downloads / f"sacrilege_analysis_{timestamp}.json"
+        
+        rankings = self.death_analyzer.get_rankings()
+        
+        data = {
+            "demo": self.demo_path.name if hasattr(self, 'demo_path') else "unknown",
+            "map": self.map_config.display_name if self.map_config else "unknown",
+            "current_round": self.current_round,
+            "total_rounds": len(self.rounds),
+            "rankings": [
+                {
+                    "player": r.name,
+                    "team": r.team,
+                    "grade": r.rank_grade,
+                    "kills": r.kills,
+                    "deaths": r.deaths,
+                    "avg_blame": round(r.avg_blame, 1),
+                    "kd_ratio": round(r.kd_ratio, 2),
+                }
+                for r in rankings
+            ],
+            "statistics": {
+                "ct_kills": self.total_kills.get('CT', 0),
+                "t_kills": self.total_kills.get('T', 0),
+            }
+        }
+        
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        print(f"✓ Analysis exported: {filename}")
     
     def _next_round(self):
         if not self.all_ticks: return
