@@ -387,6 +387,12 @@ class RadarReplayer:
     
     def _handle_click(self, e):
         x, y = e.pos
+        
+        # Open Demo button (top-left near logo)
+        if 200 <= x <= 330 and 10 <= y <= 42:
+            self._open_demo_file()
+            return
+        
         # Timeline click
         ty = self.height - 42
         tx, tw = 380, self.width - 420
@@ -591,6 +597,16 @@ class RadarReplayer:
         # Subtitle
         sub = self.font_xs.render("CS2 DEMO VIEWER", True, Theme.GRAY)
         self.screen.blit(sub, (18, 38))
+        
+        # Open Demo button
+        btn_rect = pygame.Rect(200, 12, 120, 28)
+        mouse_pos = pygame.mouse.get_pos()
+        is_hover = btn_rect.collidepoint(mouse_pos)
+        btn_color = Theme.CARD_HOVER if is_hover else Theme.CARD
+        pygame.draw.rect(self.screen, btn_color, btn_rect, border_radius=4)
+        pygame.draw.rect(self.screen, Theme.ACCENT, btn_rect, 1, border_radius=4)
+        btn_txt = self.font_sm.render("📂 Open Demo", True, Theme.ACCENT if is_hover else Theme.WHITE)
+        self.screen.blit(btn_txt, (btn_rect.x + 10, btn_rect.y + 6))
         
         # Accent line with gradient effect
         for i in range(3):
