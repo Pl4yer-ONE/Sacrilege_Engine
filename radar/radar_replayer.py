@@ -651,8 +651,7 @@ class RadarReplayer:
         
         # Animated logo
         pulse = 0.5 + abs(math.sin(self.frame * 0.03)) * 0.5
-        r, g, b = Theme.ACCENT
-        glow = (r, int(g * pulse + 55), b)
+        glow = (0, min(255, int(180 * pulse + 75)), 255)  # Cyan glow, clamped
         logo = self.font_xl.render("SACRILEGE", True, glow)
         self.screen.blit(logo, (15, 10))
         
