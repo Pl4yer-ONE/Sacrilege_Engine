@@ -853,24 +853,36 @@ class RadarReplayer:
     def _draw_player_card(self, p, x, y, w):
         h = 50
         alive = p['alive']
+        is_selected = p['name'] == self.selected_player
         
-        # Background with hover-like effect for alive
-        bg = Theme.CARD if alive else (16, 18, 22)
+        # Background with selection/hover effect
+        if is_selected:
+            bg = Theme.CARD_ACTIVE
+            # Glow border for selected
+            pygame.draw.rect(self.screen, Theme.ACCENT, (x - 2, y - 2, w + 4, h + 4), 2, border_radius=8)
+        else:
+            bg = Theme.CARD if alive else (16, 18, 22)
+        
         pygame.draw.rect(self.screen, bg, (x, y, w, h), border_radius=6)
         
-        # Team accent
+        # Team accent bar
         color = Theme.CT if p['team'] == 'CT' else Theme.T
         if not alive:
             color = (color[0]//3, color[1]//3, color[2]//3)
-        pygame.draw.rect(self.screen, color, (x, y + 6, 3, h - 12), border_radius=2)
+        pygame.draw.rect(self.screen, color, (x, y + 6, 4, h - 12), border_radius=2)
         
-        # Avatar with team color
+        # Avatar with team color and glow for alive
+        if alive:
+            # Subtle glow
+            glow_surf = pygame.Surface((40, 40), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (*color[:3], 40), (20, 20), 18)
+            self.screen.blit(glow_surf, (x + 6, y + h//2 - 20))
+        
         pygame.draw.circle(self.screen, color, (x + 26, y + h//2), 14)
         pygame.draw.circle(self.screen, Theme.WHITE if alive else Theme.MUTED, (x + 26, y + h//2), 14, 2)
         
         # Bomb/Defuser indicators
         if p.get('bomb'):
-            # Pulsing bomb indicator
             pulse = abs(math.sin(self.frame * 0.15)) * 5
             pygame.draw.circle(self.screen, Theme.BOMB_GLOW, (x + 26, y + h//2), int(6 + pulse))
             pygame.draw.circle(self.screen, Theme.DANGER, (x + 26, y + h//2), 5)
@@ -882,8 +894,20 @@ class RadarReplayer:
         name_color = Theme.WHITE if alive else Theme.MUTED
         self.screen.blit(self.font_md.render(p['name'], True, name_color), (x + 48, y + 6))
         
+        # Player grade indicator (from death analyzer)
+        if self.death_analyzer:
+            rankings = self.death_analyzer.get_rankings()
+            for r in rankings:
+                if r.name == p['name']:
+                    grade = r.rank_grade
+                    grade_color = get_grade_color(grade)
+                    # Draw grade badge
+                    pygame.draw.rect(self.screen, grade_color, (x + w - 28, y + 4, 22, 18), border_radius=4)
+                    self.screen.blit(self.font_sm.render(grade, True, Theme.BG), (x + w - 22, y + 5))
+                    break
+        
         if alive:
-            # HP bar
+            # HP bar with gradient feel
             bar_x, bar_y, bar_w = x + 48, y + 28, 110
             pygame.draw.rect(self.screen, Theme.MUTED, (bar_x, bar_y, bar_w, 6), border_radius=3)
             
@@ -892,19 +916,21 @@ class RadarReplayer:
             hp_w = int(bar_w * hp / 100)
             pygame.draw.rect(self.screen, hp_color, (bar_x, bar_y, hp_w, 6), border_radius=3)
             
-            # Stats line
-            stats = f"{hp}  |  {p['armor']}  |  ${p['equip']}"
+            # Stats: HP | Armor | Equip value
+            stats = f"{hp}HP  |  {p['armor']}  |  ${p['equip']}"
             self.screen.blit(self.font_xs.render(stats, True, Theme.GRAY), (x + 48, y + 38))
             
-            # Weapon
+            # Weapon on right
             weapon = p.get('weapon', '').replace('weapon_', '')[:10]
             if weapon:
                 w_txt = self.font_xs.render(weapon, True, Theme.MUTED)
-                self.screen.blit(w_txt, (x + w - w_txt.get_width() - 10, y + 18))
+                self.screen.blit(w_txt, (x + w - w_txt.get_width() - 10, y + 28))
             
-            # K/D
-            kd = f"{p.get('kills', 0)}/{p.get('deaths', 0)}"
-            self.screen.blit(self.font_sm.render(kd, True, Theme.GRAY), (x + w - 40, y + 6))
+            # K/D with color
+            kills = p.get('kills', 0)
+            deaths = p.get('deaths', 0)
+            kd_color = Theme.SUCCESS if kills > deaths else Theme.DANGER if deaths > kills else Theme.GRAY
+            self.screen.blit(self.font_sm.render(f"{kills}/{deaths}", True, kd_color), (x + w - 40, y + 40))
         else:
             self.screen.blit(self.font_sm.render("✕ ELIMINATED", True, Theme.DANGER), (x + 48, y + 28))
     
