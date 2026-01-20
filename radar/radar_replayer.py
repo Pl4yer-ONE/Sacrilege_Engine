@@ -1,3 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Pl4yer-ONE <mahadevan.rajeev27@gmail.com>
+# SPDX-License-Identifier: LicenseRef-Sacrilege-EULA
+#
+# Sacrilege Engine - CS2 Demo Intelligence System
+# https://github.com/Pl4yer-ONE/Sacrilege_Engine
+
 """
 SACRILEGE RADAR - Ultimate CS2 Demo Replay Viewer
 Professional visualization with full statistics and animations
@@ -100,7 +106,7 @@ class RadarReplayer:
             self.font_md = pygame.font.SysFont('SF Pro Text', 16)
             self.font_sm = pygame.font.SysFont('SF Pro Text', 14)
             self.font_xs = pygame.font.SysFont('SF Pro Text', 11)
-        except:
+        except Exception:
             self.font_xl = pygame.font.SysFont('Arial', 36, bold=True)
             self.font_lg = pygame.font.SysFont('Arial', 22, bold=True)
             self.font_md = pygame.font.SysFont('Arial', 16)

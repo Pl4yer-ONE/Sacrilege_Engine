@@ -1,3 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Pl4yer-ONE <mahadevan.rajeev27@gmail.com>
+# SPDX-License-Identifier: LicenseRef-Sacrilege-EULA
+#
+# Sacrilege Engine - CS2 Demo Intelligence System
+# https://github.com/Pl4yer-ONE/Sacrilege_Engine
+
 """
 Death Analyzer Module - BRUTAL Edition
 Comprehensive tactical mistake detection with performance ranking
