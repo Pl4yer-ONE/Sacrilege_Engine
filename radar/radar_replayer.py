@@ -609,6 +609,15 @@ class RadarReplayer:
                             
                             # Add popup (show for 5 seconds = 320 ticks)
                             self.death_popups.append((analysis, kt + 320))
+                            
+                            # Track death position for heatmap
+                            self.death_positions.append({
+                                'x': analysis.x,
+                                'y': analysis.y,
+                                'team': k['victim_team'],
+                                'round': self.current_round,
+                                'victim': k['victim'],
+                            })
         
         # Trim old kills from feed
         self.recent_kills = [k for k in self.recent_kills if tick - k['tick'] < 400]
@@ -885,6 +894,10 @@ class RadarReplayer:
         
         # Utility
         self._draw_utility(rx, ry, tick)
+        
+        # Heatmap overlay (M key toggle)
+        if self.show_heatmap:
+            self._draw_heatmap_overlay(rx, ry)
         
         # Kill animations
         self._draw_kill_animations(rx, ry, tick)
@@ -1288,6 +1301,48 @@ class RadarReplayer:
                 pygame.draw.rect(self.screen, grade_color, (px + 220, cy + 3, bar_w, 8), border_radius=2)
             
             cy += 18
+
+    def _draw_heatmap_overlay(self, rx, ry):
+        """Draw death positions as heatmap overlay."""
+        if not self.map_config:
+            return
+        
+        scale = self.radar_size / 1024
+        
+        # Create semi-transparent overlay
+        overlay = pygame.Surface((self.radar_size, self.radar_size), pygame.SRCALPHA)
+        
+        # Draw each death position
+        for death in self.death_positions:
+            px, py = self.map_config.world_to_radar(death['x'], death['y'], 1024)
+            x, y = int(px * scale), int(py * scale)
+            
+            # Color by team
+            if death['team'] == 'CT':
+                color = (*Theme.CT[:3], 100)
+                glow = (*Theme.CT[:3], 40)
+            else:
+                color = (*Theme.T[:3], 100)
+                glow = (*Theme.T[:3], 40)
+            
+            # Draw glow
+            pygame.draw.circle(overlay, glow, (x, y), 18)
+            pygame.draw.circle(overlay, color, (x, y), 10)
+        
+        # If no deaths yet, show message
+        if not self.death_positions:
+            text = self.font_md.render("No deaths recorded yet", True, Theme.GRAY)
+            overlay.blit(text, (self.radar_size // 2 - text.get_width() // 2, 20))
+        
+        # Blit overlay
+        self.screen.blit(overlay, (rx, ry))
+        
+        # Draw legend
+        pygame.draw.rect(self.screen, (*Theme.PANEL[:3], 200), (rx + 5, ry + 5, 140, 50), border_radius=6)
+        pygame.draw.circle(self.screen, Theme.CT, (rx + 20, ry + 20), 6)
+        self.screen.blit(self.font_sm.render("CT Deaths", True, Theme.CT), (rx + 32, ry + 14))
+        pygame.draw.circle(self.screen, Theme.T, (rx + 20, ry + 40), 6)
+        self.screen.blit(self.font_sm.render("T Deaths", True, Theme.T), (rx + 32, ry + 34))
 
     def _draw_legend(self):
         ly = self.height - 22
