@@ -338,6 +338,21 @@ class RadarReplayer:
         elif e.key == pygame.K_END:
             self.tick_idx = len(self.all_ticks) - 1
             self._update()
+        elif e.key == pygame.K_F12:
+            self._take_screenshot()
+        elif e.key == pygame.K_h:
+            self.show_help = not getattr(self, 'show_help', False)
+        elif e.key == pygame.K_f:
+            pygame.display.toggle_fullscreen()
+    
+    def _take_screenshot(self):
+        """Save screenshot to Downloads folder."""
+        from datetime import datetime
+        downloads = Path.home() / "Downloads"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = downloads / f"sacrilege_screenshot_{timestamp}.png"
+        pygame.image.save(self.screen, str(filename))
+        print(f"✓ Screenshot saved: {filename}")
     
     def _next_round(self):
         if not self.all_ticks: return
@@ -1145,8 +1160,8 @@ class RadarReplayer:
             lx += txt.get_width() + 50
         
         # Controls hint - LARGER
-        hint = "SPACE: Play  |  ←→: Seek  |  ↑↓: Speed  |  E/R: Round"
-        self.screen.blit(self.font_md.render(hint, True, Theme.GRAY), (400, ly - 8))
+        hint = "SPACE: Play  |  ←→: Seek  |  ↑↓: Speed  |  E/R: Round  |  F12: Screenshot  |  H: Help"
+        self.screen.blit(self.font_md.render(hint, True, Theme.GRAY), (350, ly - 8))
 
 
 def main():
