@@ -1197,27 +1197,43 @@ class RadarReplayer:
         
         # Background
         pygame.draw.rect(self.screen, Theme.PANEL, (tx - 18, ty - 10, tw + 36, 36), border_radius=8)
-        pygame. draw.rect(self.screen, Theme.CARD, (tx, ty, tw, 18), border_radius=4)
+        pygame.draw.rect(self.screen, Theme.CARD, (tx, ty, tw, 18), border_radius=4)
         
         if self.all_ticks:
             total = len(self.all_ticks) - 1
+            max_tick = self.all_ticks[-1] if self.all_ticks else 1
+            
             if total > 0:
                 prog = self.tick_idx / total
                 pw = int(tw * prog)
                 
-                # Progress bar with gradient-like appearance
+                # Progress bar
                 pygame.draw.rect(self.screen, Theme.ACCENT, (tx, ty, pw, 18), border_radius=4)
+                
+                # Kill markers on timeline
+                for kill_tick, kills in self.kills_by_tick.items():
+                    if kill_tick < max_tick:
+                        kx = tx + int((kill_tick / max_tick) * tw)
+                        for k in kills:
+                            # CT deaths = blue dot, T deaths = orange dot
+                            if k.get('victim_team') == 'CT' or 'CT' in str(k.get('victim', '')):
+                                color = Theme.CT
+                            else:
+                                color = Theme.T
+                            pygame.draw.circle(self.screen, color, (kx, ty + 9), 3)
+                
+                # Round markers
+                for s, e, n in self.rounds:
+                    if s < max_tick:
+                        rx = tx + int((s / max_tick) * tw)
+                        pygame.draw.line(self.screen, Theme.WHITE, (rx, ty - 5), (rx, ty + 23), 2)
+                        # Round number
+                        if n % 3 == 1:  # Show every 3rd round
+                            self.screen.blit(self.font_xs.render(str(n), True, Theme.MUTED), (rx - 3, ty - 12))
                 
                 # Playhead
                 pygame.draw.circle(self.screen, Theme.WHITE, (tx + pw, ty + 9), 10)
                 pygame.draw.circle(self.screen, Theme.ACCENT, (tx + pw, ty + 9), 6)
-                
-                # Round markers
-                max_tick = self.all_ticks[-1]
-                for s, e, n in self.rounds:
-                    if s < max_tick:
-                        rx = tx + int((s / max_tick) * tw)
-                        pygame.draw.line(self.screen, Theme.MUTED, (rx, ty - 5), (rx, ty + 3), 1)
                 
                 # Time
                 secs = tick // 64
