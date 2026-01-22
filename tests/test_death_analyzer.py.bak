@@ -1,0 +1,208 @@
+# SPDX-FileCopyrightText: 2026 Pl4yer-ONE <mahadevan.rajeev27@gmail.com>
+# SPDX-License-Identifier: LicenseRef-Sacrilege-EULA
+
+"""Unit tests for DeathAnalyzer."""
+
+import pytest
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.intelligence.death_analyzer import (
+    DeathAnalyzer,
+    DeathAnalysis,
+    MistakeType,
+    PlayerStats,
+)
+
+
+class TestMistakeType:
+    """Test MistakeType enum."""
+
+    def test_all_mistake_types_exist(self):
+        """Verify all 15 mistake types are defined."""
+        expected_types = [
+            'ISOLATED', 'CROSSFIRE', 'SOLO_PUSH', 'NO_TRADE', 'WIDE_PEEK',
+            'UTILITY_DEATH', 'FLASHED', 'IN_MOLLY', 'OUTNUMBERED', 'REPEEKER',
+            'FIRST_CONTACT', 'BAD_TIMING', 'CLUTCH_ATTEMPT', 'FAIR_DUEL', 'TRADED'
+        ]
+        for mtype in expected_types:
+            assert hasattr(MistakeType, mtype), f"Missing MistakeType: {mtype}"
+
+    def test_mistake_values_are_strings(self):
+        """Mistake values should be lowercase strings."""
+        assert MistakeType.ISOLATED.value == "isolated"
+        assert MistakeType.CROSSFIRE.value == "crossfire"
+
+
+class TestDeathAnalysis:
+    """Test DeathAnalysis dataclass."""
+
+    def create_basic_analysis(self) -> DeathAnalysis:
+        """Helper to create a basic analysis."""
+        return DeathAnalysis(
+            victim_name="TestPlayer",
+            victim_team="CT",
+            attacker_name="Enemy",
+            tick=1000,
+            round_num=1,
+            position=(0.0, 0.0),
+            mistakes=[MistakeType.CROSSFIRE, MistakeType.ISOLATED],
+            reasons=["Was in crossfire", "No teammates nearby"],
+            severity=4,
+            was_tradeable=True,
+            was_traded=False,
+            teammate_distance=1500.0,
+            was_flashed=False,
+            in_utility=False,
+            enemy_count=2,
+            teammate_count=0,
+        )
+
+    def test_primary_mistake_returns_highest_priority(self):
+        """Primary mistake should be highest priority in list."""
+        analysis = self.create_basic_analysis()
+        # ISOLATED is higher priority than CROSSFIRE
+        assert analysis.primary_mistake() == MistakeType.ISOLATED
+
+    def test_blame_score_calculation(self):
+        """Blame score should be 0-100."""
+        analysis = self.create_basic_analysis()
+        score = analysis.blame_score()
+        assert 0 <= score <= 100
+        # Severity 4 * 20 = 80, +10 for isolation = 90
+        assert score >= 80  # High blame for isolated crossfire death
+
+    def test_blame_score_reduced_when_traded(self):
+        """Traded deaths should have lower blame."""
+        analysis = self.create_basic_analysis()
+        analysis.was_traded = True
+        score = analysis.blame_score()
+        # Trading reduces blame by 15
+        assert score < 90
+
+
+class TestPlayerStats:
+    """Test PlayerStats dataclass."""
+
+    def test_kd_ratio_calculation(self):
+        """K/D should be kills / deaths."""
+        stats = PlayerStats(name="Test", team="CT", kills=10, deaths=5)
+        assert stats.kd_ratio == 2.0
+
+    def test_kd_ratio_no_deaths(self):
+        """K/D with 0 deaths should not crash."""
+        stats = PlayerStats(name="Test", team="CT", kills=10, deaths=0)
+        assert stats.kd_ratio == 10.0  # Uses max(1, deaths)
+
+    def test_rank_grade_s(self):
+        """High performance should be S grade."""
+        stats = PlayerStats(name="Test", team="CT", kills=20, deaths=5)
+        # KD 4.0 should give high score
+        assert stats.rank_grade in ["S", "A"]
+
+    def test_rank_grade_f(self):
+        """Low performance should be F grade."""
+        stats = PlayerStats(name="Test", team="CT", kills=1, deaths=15)
+        # Low KD should give F
+        assert stats.rank_grade in ["D", "F"]
+
+
+class TestDeathAnalyzer:
+    """Test DeathAnalyzer class."""
+
+    def test_initialization(self):
+        """Analyzer should initialize cleanly."""
+        analyzer = DeathAnalyzer()
+        assert analyzer is not None
+        assert len(analyzer.player_stats) == 0
+
+    def test_analyze_death_basic(self):
+        """Basic death analysis should work."""
+        analyzer = DeathAnalyzer()
+
+        kill = {
+            'attacker': 'Enemy',
+            'attacker_team': 'T',
+            'victim': 'Player',
+            'victim_team': 'CT',
+            'victim_id': '12345',
+            'weapon': 'ak47',
+            'hs': True,
+        }
+
+        players = [
+            {'name': 'Player', 'team': 'CT', 'x': 0, 'y': 0, 'health': 0, 'alive': False},
+            {'name': 'Enemy', 'team': 'T', 'x': 100, 'y': 0, 'health': 100, 'alive': True},
+        ]
+
+        analysis = analyzer.analyze_death(kill, players, [], [], [], [], 1000, 1)
+
+        assert analysis.victim_name == 'Player'
+        assert analysis.attacker_name == 'Enemy'
+        assert len(analysis.mistakes) > 0
+
+    def test_get_rankings_empty(self):
+        """Rankings with no data should return empty list."""
+        analyzer = DeathAnalyzer()
+        rankings = analyzer.get_rankings()
+        assert rankings == []
+
+    def test_update_kill_tracks_kills(self):
+        """Kills should be tracked per player."""
+        analyzer = DeathAnalyzer()
+        analyzer.update_kill('Player1', 'CT')
+        analyzer.update_kill('Player1', 'CT')
+        analyzer.update_kill('Player2', 'T')
+
+        rankings = analyzer.get_rankings()
+        player1 = next((r for r in rankings if r.name == 'Player1'), None)
+
+        assert player1 is not None
+        assert player1.kills == 2
+
+    def test_reset_round(self):
+        """Reset should clear round-specific data."""
+        analyzer = DeathAnalyzer()
+        analyzer.update_kill('Player1', 'CT')
+        analyzer.reset_round()
+
+        # Round data should reset but player stats remain
+        rankings = analyzer.get_rankings()
+        assert len(rankings) > 0
+
+
+class TestIntegration:
+    """Integration tests with real-ish data."""
+
+    def test_full_round_analysis(self):
+        """Simulate a full round of deaths."""
+        analyzer = DeathAnalyzer()
+
+        # Simulate 5 deaths
+        for i in range(5):
+            kill = {
+                'attacker': f'T{i}',
+                'attacker_team': 'T',
+                'victim': f'CT{i}',
+                'victim_team': 'CT',
+                'victim_id': str(i),
+                'weapon': 'ak47',
+                'hs': i % 2 == 0,
+            }
+
+            players = [
+                {'name': f'CT{i}', 'team': 'CT', 'x': i*100, 'y': 0, 'health': 0, 'alive': False},
+                {'name': f'T{i}', 'team': 'T', 'x': i*100+50, 'y': 50, 'health': 100, 'alive': True},
+            ]
+
+            analyzer.analyze_death(kill, players, [], [], [], [], 1000 + i*100, 1)
+            analyzer.update_kill(f'T{i}', 'T')
+
+        rankings = analyzer.get_rankings()
+        assert len(rankings) == 10  # 5 CTs + 5 Ts
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])

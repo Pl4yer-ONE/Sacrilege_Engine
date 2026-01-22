@@ -57,22 +57,31 @@ class Vector3:
     
     def distance_to(self, other: "Vector3") -> float:
         """Calculate Euclidean distance to another point."""
-        return math.sqrt(
-            (self.x - other.x) ** 2 +
-            (self.y - other.y) ** 2 +
-            (self.z - other.z) ** 2
+        return math.sqrt(self.distance_squared_to(other))
+
+    def distance_squared_to(self, other: "Vector3") -> float:
+        """Calculate squared Euclidean distance to another point."""
+        return (
+            (self.x - other.x) ** 2
+            + (self.y - other.y) ** 2
+            + (self.z - other.z) ** 2
         )
     
     def distance_2d(self, other: "Vector3") -> float:
         """Calculate 2D distance (ignoring Z)."""
-        return math.sqrt(
-            (self.x - other.x) ** 2 +
-            (self.y - other.y) ** 2
-        )
+        return math.sqrt(self.distance_2d_squared(other))
+
+    def distance_2d_squared(self, other: "Vector3") -> float:
+        """Calculate squared 2D distance (ignoring Z)."""
+        return (self.x - other.x) ** 2 + (self.y - other.y) ** 2
     
     def magnitude(self) -> float:
         """Calculate vector magnitude."""
-        return math.sqrt(self.x ** 2 + self.y ** 2 + self.z ** 2)
+        return math.sqrt(self.magnitude_squared())
+
+    def magnitude_squared(self) -> float:
+        """Calculate squared vector magnitude."""
+        return self.x ** 2 + self.y ** 2 + self.z ** 2
     
     def normalized(self) -> "Vector3":
         """Return normalized vector."""
