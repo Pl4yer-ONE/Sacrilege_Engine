@@ -159,11 +159,9 @@ class TradeDisciplineModule(IntelligenceModule):
             player_team
         )
         
-        # Calculate distance (simplified - in full impl, get exact positions)
-        distance = victim_pos.distance_to(killer_pos)
-        
-        # Check if trade was possible based on distance
-        trade_possible = distance < self.max_distance * 2  # Rough estimate
+        # Check if trade was possible based on squared distance for efficiency
+        max_dist_sq = (self.max_distance * 2) ** 2
+        trade_possible = victim_pos.distance_squared_to(killer_pos) < max_dist_sq  # Rough estimate
         
         if trade_kill:
             delay_ms = int((trade_kill.tick - death.tick) * (1000 / 64))  # Assuming 64 tick
