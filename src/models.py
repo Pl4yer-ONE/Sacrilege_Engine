@@ -63,6 +63,14 @@ class Vector3:
             (self.z - other.z) ** 2
         )
     
+    def distance_to_squared(self, other: "Vector3") -> float:
+        """Calculate squared Euclidean distance to another point (optimization)."""
+        return (
+            (self.x - other.x) ** 2 +
+            (self.y - other.y) ** 2 +
+            (self.z - other.z) ** 2
+        )
+
     def distance_2d(self, other: "Vector3") -> float:
         """Calculate 2D distance (ignoring Z)."""
         return math.sqrt(
