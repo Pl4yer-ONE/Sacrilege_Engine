@@ -3,7 +3,7 @@
 from pathlib import Path
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -34,9 +34,10 @@ class Settings(BaseSettings):
     trade_max_distance: float = 800.0
     pre_aim_angle_threshold: float = 15.0
     
-    class Config:
-        env_prefix = "SACRILEGE_"
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_prefix="SACRILEGE_",
+        env_file=".env"
+    )
 
 
 @lru_cache
