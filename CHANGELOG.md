@@ -4,6 +4,17 @@ All notable changes to Sacrilege Engine will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-01-23
+
+### Added  
+- **Timeline kill markers** - CT (blue) and T (orange) death dots on timeline
+- **Round numbers** on timeline every 3rd round
+- **Enhanced player cards** - Grade badges, selection glow, colored K/D
+
+### Fixed
+- Round kills now recalculate correctly when seeking
+- Player card selection highlight
+
 ## [1.4.0] - 2026-01-20
 
 ### Added

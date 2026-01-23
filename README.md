@@ -155,10 +155,14 @@ python radar/radar_replayer.py "path/to/demo.dem"
 | `←` `→` | Seek ±5 seconds |
 | `↑` `↓` | Adjust playback speed |
 | `E` `R` | Previous / Next round |
-| `F12` | Save screenshot to Downloads |
-| `H` | Toggle help overlay |
-| `F` | Toggle fullscreen |
+| `M` | Toggle heatmap overlay |
+| `B` | Add bookmark |
+| `J` | Export to JSON |
+| `F12` | Screenshot to Downloads |
+| `H` | Help overlay |
+| `F` | Fullscreen |
 | `HOME` / `END` | Jump to start / end |
+| Click | Select player card |
 
 ---
 
