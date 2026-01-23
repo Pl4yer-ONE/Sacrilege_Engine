@@ -1,0 +1,407 @@
+================================================================================
+                              SACRILEGE ENGINE
+       A Real-Time CS2 Demo Analysis System with Blame Attribution
+================================================================================
+
+                           TECHNICAL REPORT (IEEE Format)
+
+Author: Pl4yer-ONE
+Email: mahadevan.rajeev27@gmail.com
+Repository: https://github.com/Pl4yer-ONE/Sacrilege_Engine
+Date: January 2026
+Version: 1.4.1
+
+================================================================================
+                                   ABSTRACT
+================================================================================
+
+Sacrilege Engine is a deterministic Counter-Strike 2 (CS2) demo analysis system 
+that provides real-time death attribution and performance grading. Unlike 
+traditional post-match statistics that focus on aggregate metrics like K/D and 
+ADR, this system assigns blame scores (0-100%) to individual deaths, classifying 
+tactical mistakes across 15 categories and generating S-F performance grades in 
+real-time. The system processes .dem demo files and renders an interactive radar 
+replay with live statistics, kill feed with death reasons, and performance 
+rankings.
+
+Keywords: Counter-Strike 2, Demo Analysis, Tactical Mistakes, Performance 
+Metrics, Radar Visualization, Pygame, Python
+
+================================================================================
+                              I. INTRODUCTION
+================================================================================
+
+Traditional CS2 analysis tools focus on aggregate statistics (K/D, ADR, KAST) 
+that fail to explain why a player died. Sacrilege Engine addresses this gap by:
+
+    1. Classifying each death into tactical mistake categories
+    2. Assigning blame scores (0-100%) based on situational factors
+    3. Generating performance grades (S/A/B/C/D/F) in real-time
+    4. Visualizing deaths with detailed popup analytics
+
+The system is designed for individual improvement rather than team strategy, 
+making it complementary to existing coaching tools.
+
+================================================================================
+                          II. SYSTEM ARCHITECTURE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            SACRILEGE ENGINE                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐       │
+│  │   Demo Parser    │───▶│  Death Analyzer  │───▶│  Radar Replayer  │       │
+│  │   (demoparser2)  │    │   (15 types)     │    │    (pygame)      │       │
+│  └──────────────────┘    └──────────────────┘    └──────────────────┘       │
+│           │                       │                       │                  │
+│           ▼                       ▼                       ▼                  │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐       │
+│  │   Player Data    │    │   Blame Scores   │    │    Live UI       │       │
+│  │   Tick-by-tick   │    │   Performance    │    │    Rankings      │       │
+│  └──────────────────┘    └──────────────────┘    └──────────────────┘       │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Figure 1: System architecture showing data flow from demo parsing to 
+visualization.
+
+A. Demo Parser Module
+---------------------
+Extracts tick-by-tick player positions, health, equipment, and events using 
+the demoparser2 library. Key data extracted:
+
+    - Player positions (X, Y, Z coordinates)
+    - Health and armor values
+    - Equipment and weapons
+    - Kill events with timestamps
+    - Utility events (smokes, flashes, mollies)
+    - Round start/end events
+
+B. Death Analyzer Module
+------------------------
+The core intelligence module that classifies deaths into 15 mistake types:
+
+┌────────────────┬──────────┬────────────────────────────────────────────────┐
+│   Category     │ Severity │              Description                       │
+├────────────────┼──────────┼────────────────────────────────────────────────┤
+│ ISOLATED       │    5     │ No teammate within 800 units                   │
+│ CROSSFIRE      │    5     │ Exposed to 2+ enemy angles                     │
+│ SOLO_PUSH      │    5     │ Advanced alone into enemy territory            │
+│ OUTNUMBERED    │    4     │ Engaged against numerical disadvantage         │
+│ NO_TRADE       │    4     │ Death not traded within 3 seconds              │
+│ UTILITY_MISS   │    4     │ No utility used before engagement              │
+│ WIDE_PEEK      │    3     │ Over-extended peek angle                       │
+│ OVERROTATE     │    3     │ Left position during rotation                  │
+│ FLASHED        │    3     │ Died while flash-blinded                       │
+│ MOLLIED        │    3     │ Died in molotov damage                         │
+│ FIRST_CONTACT  │    2     │ Entry death (acceptable risk)                  │
+│ TRADED         │    1     │ Death was traded by teammate                   │
+│ FAIR_DUEL      │    1     │ Lost aim duel (no tactical error)              │
+│ ACE_VICTIM     │    1     │ Died to player on ace streak                   │
+│ UNKNOWN        │    1     │ Unclassified death                             │
+└────────────────┴──────────┴────────────────────────────────────────────────┘
+
+Table I: Death classification categories with severity ratings.
+
+C. Radar Replayer Module
+------------------------
+Premium UI visualization using Pygame with the following components:
+
+    - Map radar overlay (8 competitive maps supported)
+    - Player cards with health, armor, equipment
+    - Live kill feed with death reasons
+    - Performance rankings with S-F grades
+    - Timeline with kill markers
+    - Heatmap overlay for death positions
+
+================================================================================
+                       III. BLAME SCORE ALGORITHM
+================================================================================
+
+A. Base Calculation
+-------------------
+The blame score is calculated using the following formula:
+
+    Blame Score = (Severity × 20) + Modifiers
+
+Where:
+    - Severity: 1-5 based on mistake category
+    - Modifiers: Situational adjustments
+
+B. Modifier Values
+------------------
+    +10  Isolation penalty (distance > 1000 units from teammates)
+    -10  Outnumbered adjustment (facing 3+ enemies)
+    -15  Trade credit (death was traded within 3 seconds)
+    -5   Flash victim (was flash-blinded when killed)
+    +5   Solo push penalty
+    
+C. Final Score
+--------------
+    Final = clamp(0, 100, Base + Modifiers)
+
+Example Calculation:
+    Player died isolated in crossfire
+    Base: 5 × 20 = 100
+    +10 (isolated)
+    -10 (3 enemies)
+    Final: min(100, max(0, 100)) = 100% blame
+
+================================================================================
+                       IV. PERFORMANCE GRADING
+================================================================================
+
+A. Grade Formula
+----------------
+    Performance Score = (K/D × 40) - (Avg Blame × 0.4) + 20
+
+B. Grade Thresholds
+-------------------
+┌───────┬────────────┬───────────────────────────────────────┐
+│ Grade │ Threshold  │            Meaning                    │
+├───────┼────────────┼───────────────────────────────────────┤
+│   S   │   ≥ 80     │ Elite performance                     │
+│   A   │   ≥ 65     │ Strong contributor                    │
+│   B   │   ≥ 50     │ Solid player                          │
+│   C   │   ≥ 35     │ Below average                         │
+│   D   │   ≥ 20     │ Poor performance                      │
+│   F   │   < 20     │ Team liability                        │
+└───────┴────────────┴───────────────────────────────────────┘
+
+Table II: Performance grade thresholds and meanings.
+
+C. Grade Colors (UI)
+--------------------
+    S: Gold (#FFD700)
+    A: Green (#64FF96)
+    B: Blue (#64C8FF)
+    C: Silver (#A0A0A0)
+    D: Orange (#FFA000)
+    F: Red (#FF4646)
+
+================================================================================
+                          V. IMPLEMENTATION
+================================================================================
+
+A. Technology Stack
+-------------------
+    Language:       Python 3.9+
+    Demo Parsing:   demoparser2
+    Visualization:  Pygame 2.6+
+    Data:           Pandas, NumPy
+    Testing:        Pytest
+
+B. File Structure
+-----------------
+Sacrilege_Engine/
+├── src/
+│   ├── parser/
+│   │   └── demo_parser.py          # Demo file parsing
+│   ├── intelligence/
+│   │   └── death_analyzer.py       # Core blame attribution
+│   └── visualization/              # Heatmap generation
+├── radar/
+│   ├── radar_replayer.py           # Main application (1466 lines)
+│   └── maps/                       # Radar overlays (8 maps)
+├── tests/
+│   ├── test_death_analyzer.py      # Unit tests (15 tests)
+│   └── test_integration.py         # Integration tests (6 tests)
+├── docs/                           # Documentation
+└── config.json                     # User preferences
+
+C. Installation
+---------------
+    git clone https://github.com/Pl4yer-ONE/Sacrilege_Engine.git
+    cd Sacrilege_Engine
+    python -m venv venv && source venv/bin/activate
+    pip install -e .
+
+D. Usage
+--------
+    python radar/radar_replayer.py "path/to/demo.dem"
+
+================================================================================
+                              VI. CONTROLS
+================================================================================
+
+┌───────────────┬────────────────────────────────────────────────────────────┐
+│     Key       │                         Action                             │
+├───────────────┼────────────────────────────────────────────────────────────┤
+│    SPACE      │ Play / Pause                                               │
+│    ← →        │ Seek ±5 seconds                                            │
+│    ↑ ↓        │ Adjust playback speed                                      │
+│    E / R      │ Previous / Next round                                      │
+│    M          │ Toggle heatmap overlay                                     │
+│    B          │ Add bookmark at current position                           │
+│    J          │ Export analysis to JSON                                    │
+│    F12        │ Screenshot to ~/Downloads                                  │
+│    H          │ Toggle help overlay                                        │
+│    F          │ Toggle fullscreen                                          │
+│  HOME / END   │ Jump to start / end                                        │
+│    Click      │ Select player card                                         │
+└───────────────┴────────────────────────────────────────────────────────────┘
+
+Table III: Keyboard and mouse controls.
+
+================================================================================
+                          VII. VALIDATION RESULTS
+================================================================================
+
+A. Test Dataset
+---------------
+    Maps Tested:        4 (Dust2, Ancient, Overpass, Mirage)
+    Total Deaths:       330
+    Rounds Analyzed:    80+
+    Processing Time:    ~3 seconds per demo
+
+B. Mistake Distribution
+-----------------------
+    CROSSFIRE:      59%  ████████████████████████░░░░░░░░░░░░░░░░
+    ISOLATED:       32%  ████████████████░░░░░░░░░░░░░░░░░░░░░░░░
+    NO_TRADE:       15%  ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    OUTNUMBERED:    12%  ██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    SOLO_PUSH:       8%  ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+C. Per-Map Results
+------------------
+┌──────────────┬────────┬────────────────────────────────────────────────────┐
+│     Map      │ Deaths │              Top Mistakes                          │
+├──────────────┼────────┼────────────────────────────────────────────────────┤
+│ de_dust2     │   81   │ CROSSFIRE (54%), ISOLATED (38%)                    │
+│ de_ancient   │   75   │ CROSSFIRE (55%), ISOLATED (37%)                    │
+│ de_overpass  │   89   │ CROSSFIRE (62%), ISOLATED (28%)                    │
+│ de_mirage    │   85   │ CROSSFIRE (65%), ISOLATED (27%)                    │
+└──────────────┴────────┴────────────────────────────────────────────────────┘
+
+Table IV: Death analysis distribution across competitive maps.
+
+D. Test Suite
+-------------
+    Unit Tests:         15 passed
+    Integration Tests:   6 passed
+    Total:              21 tests, 100% pass rate
+
+================================================================================
+                         VIII. UI COMPONENTS
+================================================================================
+
+A. Premium Theme
+----------------
+The UI uses a glassmorphism-inspired design with 60+ color definitions:
+
+    Background:     #060810 (Deep space black)
+    Panel:          #0C1016 (Dark panel)
+    CT Color:       #3C8CFF (Neon blue)
+    T Color:        #FFAA28 (Neon orange)
+    Accent:         #00DCFF (Cyan)
+
+B. Player Cards
+---------------
+Each player card displays:
+    - Team color accent bar
+    - Avatar with glow effect (alive players)
+    - Player name
+    - Health bar with color coding
+    - Armor value
+    - Equipment value ($)
+    - Current weapon
+    - K/D ratio (colored)
+    - Performance grade badge
+
+C. Timeline
+-----------
+The timeline at bottom shows:
+    - Progress bar with current position
+    - Round markers with numbers
+    - Kill markers (CT=blue, T=orange dots)
+    - Time elapsed and total duration
+
+D. Heatmap Overlay (M key)
+--------------------------
+Toggle death position overlay on radar:
+    - CT deaths: Blue circles with glow
+    - T deaths: Orange circles with glow
+    - Legend showing death counts
+
+================================================================================
+                          IX. FUTURE WORK
+================================================================================
+
+1. Machine Learning Integration
+   - Train models on professional matches
+   - Improve mistake classification accuracy
+
+2. Team Coordination Analysis
+   - Extend blame attribution to team failures
+   - Detect coordination breakdowns
+
+3. Web Dashboard
+   - Browser-based interface for remote analysis
+   - Session sharing and comparison
+
+4. Voice Coach
+   - Real-time audio feedback during demo playback
+   - Text-to-speech for death reasons
+
+5. Pro Benchmarks
+   - Compare to HLTV statistics
+   - Rank-appropriate expectations
+
+================================================================================
+                            X. CONCLUSION
+================================================================================
+
+Sacrilege Engine provides what traditional analysis tools lack: actionable, 
+individual-level feedback through blame attribution. By assigning accountability 
+to each death, players receive immediate insight into their tactical mistakes 
+rather than abstract statistics.
+
+Key Contributions:
+    ✓ 15 mistake categories for precise classification
+    ✓ Blame scores (0-100%) per death
+    ✓ S-F grades for performance ranking
+    ✓ Real-time visualization during demo playback
+    ✓ Premium UI with glassmorphism design
+    ✓ 21 automated tests with 100% pass rate
+
+================================================================================
+                            XI. REFERENCES
+================================================================================
+
+[1] Valve Corporation, "Counter-Strike 2," 2023.
+    https://www.counter-strike.net/
+
+[2] demoparser2, "CS2 Demo Parser Library," GitHub, 2024.
+    https://github.com/LaihoE/demoparser
+
+[3] boltobserv, "CS2 Radar Map Overlays," GitHub, 2023.
+    https://github.com/boltobserv/boltobserv
+
+[4] Pygame, "Pygame - Python Game Development," 2024.
+    https://www.pygame.org/
+
+================================================================================
+                              XII. LICENSE
+================================================================================
+
+PolyForm Noncommercial License 1.0.0
+
+Free for personal and educational use. Commercial use requires explicit 
+permission from the author.
+
+================================================================================
+                              XIII. CONTACT
+================================================================================
+
+Author:     Pl4yer-ONE
+Email:      mahadevan.rajeev27@gmail.com
+GitHub:     https://github.com/Pl4yer-ONE/Sacrilege_Engine
+
+================================================================================
+
+                   "The truth hurts. Sacrilege delivers it anyway."
+
+================================================================================
+                           END OF REPORT
+================================================================================
