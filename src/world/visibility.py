@@ -109,6 +109,7 @@ class VisibilitySystem:
     
     # Maximum visibility distance (units)
     MAX_VISIBILITY_DISTANCE = 4000.0
+    MAX_VISIBILITY_DISTANCE_SQUARED = MAX_VISIBILITY_DISTANCE * MAX_VISIBILITY_DISTANCE
     
     # Field of view (degrees)
     FOV = 106.0  # CS2 default FOV
@@ -144,12 +145,8 @@ class VisibilitySystem:
         obs_pos = self._eye_position(observer.position)
         tgt_pos = self._eye_position(target.position)
         
-        # Calculate distance
-        distance = obs_pos.distance_to(tgt_pos)
-        
-        # Calculate angle to target
-        to_target = tgt_pos - obs_pos
-        angle_offset = observer.view_angles.angle_to(to_target)
+        # Calculate squared distance first (optimization)
+        dist_sq = obs_pos.distance_to_squared(tgt_pos)
         
         # Get callout for target position
         callout = ""
@@ -157,15 +154,23 @@ class VisibilitySystem:
             callout = self.map_geometry.get_callout_at(target.position)
         
         # Check basic visibility conditions
-        if distance > self.MAX_VISIBILITY_DISTANCE:
+        if dist_sq > self.MAX_VISIBILITY_DISTANCE_SQUARED:
+            # Calculate actual distance only if needed for return, but skip expensive angle math
             return VisibilityInfo(
                 observer_id=observer.steam_id,
                 target_id=target.steam_id,
                 has_los=False,
-                distance=distance,
-                angle_offset=angle_offset,
+                distance=math.sqrt(dist_sq),
+                angle_offset=0.0, # Target is too far, angle irrelevant
                 callout=callout,
             )
+
+        # Target is within range, proceed with full checks
+        distance = math.sqrt(dist_sq)
+
+        # Calculate angle to target (expensive: acos, sqrt)
+        to_target = tgt_pos - obs_pos
+        angle_offset = observer.view_angles.angle_to(to_target)
         
         # Check if in field of view (peripheral awareness)
         in_fov = angle_offset <= (self.FOV / 2)
