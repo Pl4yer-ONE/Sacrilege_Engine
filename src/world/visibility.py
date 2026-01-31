@@ -67,7 +67,7 @@ class SmokeCloud:
         
         if a == 0:
             # Zero-length ray
-            return sphere_center.distance_to(ray_start) <= radius
+            return sphere_center.distance_squared_to(ray_start) <= radius * radius
         
         b = 2 * (fx * dx + fy * dy + fz * dz)
         c = fx * fx + fy * fy + fz * fz - radius * radius
@@ -144,8 +144,22 @@ class VisibilitySystem:
         obs_pos = self._eye_position(observer.position)
         tgt_pos = self._eye_position(target.position)
         
+        # Calculate squared distance for efficient checks
+        distance_sq = obs_pos.distance_squared_to(tgt_pos)
+
+        # Check basic visibility conditions
+        if distance_sq > self.MAX_VISIBILITY_DISTANCE ** 2:
+            return VisibilityInfo(
+                observer_id=observer.steam_id,
+                target_id=target.steam_id,
+                has_los=False,
+                distance=math.sqrt(distance_sq),
+                angle_offset=0, # Not computed
+                callout="",
+            )
+
         # Calculate distance
-        distance = obs_pos.distance_to(tgt_pos)
+        distance = math.sqrt(distance_sq)
         
         # Calculate angle to target
         to_target = tgt_pos - obs_pos
@@ -155,17 +169,6 @@ class VisibilitySystem:
         callout = ""
         if self.map_geometry:
             callout = self.map_geometry.get_callout_at(target.position)
-        
-        # Check basic visibility conditions
-        if distance > self.MAX_VISIBILITY_DISTANCE:
-            return VisibilityInfo(
-                observer_id=observer.steam_id,
-                target_id=target.steam_id,
-                has_los=False,
-                distance=distance,
-                angle_offset=angle_offset,
-                callout=callout,
-            )
         
         # Check if in field of view (peripheral awareness)
         in_fov = angle_offset <= (self.FOV / 2)
