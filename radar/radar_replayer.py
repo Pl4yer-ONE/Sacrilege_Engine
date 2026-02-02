@@ -154,7 +154,7 @@ def draw_rounded_rect(surface, color, rect, radius=8, border=0, border_color=Non
 class RadarReplayer:
     """Ultimate CS2 radar replay viewer with premium UI."""
     
-    def __init__(self, width: int = 1500, height: int = 920):
+    def __init__(self, width: int = 1600, height: int = 1000):
         pygame.init()
         pygame.font.init()
         
@@ -239,9 +239,26 @@ class RadarReplayer:
         # New Features v1.4
         self.show_heatmap = False  # M key toggle
         self.death_positions = []  # [(x, y, team, round)]
+        self.kill_positions = []  # [(x, y, team, round)] - NEW
         self.bookmarks = []  # [(tick, reason, data)]
         self.selected_player = None  # Clicked player card
         self.player_detail_mode = False
+        
+        # Enhanced Heatmap v1.5
+        self.heatmap_mode = 'all'  # 'all', 'kills', 'deaths', 'ct', 't'
+        self.heatmap_round_filter = None  # None = all rounds, or specific round number
+        self.heatmap_density_grid = None  # Cached density grid
+        self.heatmap_dirty = True  # Recalculate density
+        
+        # Player Trails
+        self.show_trails = False  # T key toggle
+        self.player_trails = {}  # {player_id: [(x, y, tick), ...]}
+        self.trail_length = 60  # Number of positions to keep
+        
+        # AI Coach Integration
+        self.ai_coach = None
+        self.ai_insights = []  # List of (type, text, expire_time)
+        self.ai_last_analysis = 0  # Tick of last analysis
         
     def load_demo(self, demo_path: Path) -> bool:
         from demoparser2 import DemoParser as DP2
@@ -266,29 +283,49 @@ class RadarReplayer:
             for pid, p in self.demo_data.players.items():
                 self.players[pid] = {'name': p.name, 'team': p.team.name, 'kills': 0, 'deaths': 0}
             
-            # Rounds and kills
+            # Rounds 
             for rd in self.demo_data.rounds:
                 self.rounds.append((rd.start_tick, rd.end_tick, rd.round_number))
-                for k in rd.kills:
-                    if k.tick not in self.kills_by_tick:
-                        self.kills_by_tick[k.tick] = []
-                    
-                    # Track player stats
-                    if k.attacker_id in self.players:
-                        self.players[k.attacker_id]['kills'] += 1
-                    if k.victim_id in self.players:
-                        self.players[k.victim_id]['deaths'] += 1
-                    
-                    self.kills_by_tick[k.tick].append({
-                        'attacker': self.players.get(k.attacker_id, {}).get('name', '?'),
-                        'victim': self.players.get(k.victim_id, {}).get('name', '?'),
-                        'attacker_team': self.players.get(k.attacker_id, {}).get('team', 'CT'),
-                        'weapon': k.weapon,
-                        'hs': k.headshot,
-                        'tick': k.tick,
-                        'attacker_pos': k.attacker_position,
-                        'victim_pos': k.victim_position,
-                    })
+            
+            # Extract kills directly from demoparser2 (more reliable)
+            dp2_temp = DP2(str(demo_path))
+            kill_events = dp2_temp.parse_event("player_death")
+            
+            # Build steamid to player info mapping
+            steamid_to_info = {}
+            for sid, info in self.players.items():
+                steamid_to_info[int(sid)] = info
+            
+            for _, row in kill_events.iterrows():
+                tick = int(row.get('tick', 0))
+                attacker_sid = row.get('attacker_steamid', 0)
+                victim_sid = row.get('user_steamid', 0)
+                
+                attacker_info = steamid_to_info.get(attacker_sid, {})
+                victim_info = steamid_to_info.get(victim_sid, {})
+                
+                # Track player stats
+                if attacker_sid in steamid_to_info:
+                    steamid_to_info[attacker_sid]['kills'] = steamid_to_info[attacker_sid].get('kills', 0) + 1
+                if victim_sid in steamid_to_info:
+                    steamid_to_info[victim_sid]['deaths'] = steamid_to_info[victim_sid].get('deaths', 0) + 1
+                
+                if tick not in self.kills_by_tick:
+                    self.kills_by_tick[tick] = []
+                
+                self.kills_by_tick[tick].append({
+                    'attacker': row.get('attacker_name', '?'),
+                    'victim': row.get('user_name', '?'),
+                    'attacker_team': attacker_info.get('team', 'CT'),
+                    'victim_team': victim_info.get('team', 'T'),
+                    'weapon': str(row.get('weapon', 'unknown')),
+                    'hs': bool(row.get('headshot', False)),
+                    'tick': tick,
+                    'attacker_pos': None,  # Will get from tick data
+                    'victim_pos': None,
+                })
+            
+            print(f"✓ Extracted {len(kill_events)} kills")
             
             # Tick data
             print("Extracting positions...")
@@ -317,7 +354,70 @@ class RadarReplayer:
             self.death_analyzer = DeathAnalyzer()
             print("✓ Death analyzer initialized")
             
+            # Initialize AI Coach
+            try:
+                from src.intelligence.llm_client import LLMClient
+                self.ai_coach = LLMClient()
+                if self.ai_coach.available:
+                    print("✓ AI Coach initialized (Qwen 2.5)")
+                else:
+                    print("⚠ AI Coach unavailable (Ollama not found)")
+            except Exception as e:
+                print(f"⚠ AI Coach init failed: {e}")
+                self.ai_coach = None
+            
+            # Pre-populate kill/death positions by looking up positions from tick data
+            # Build a name-to-latest-position cache from tick data
+            name_to_pos = {}
+            for tick_val in sorted(self.tick_df['tick'].unique()):
+                tick_data = self.tick_df[self.tick_df['tick'] == tick_val]
+                for _, row in tick_data.iterrows():
+                    sid = str(row.get('steamid', ''))
+                    if sid in self.players:
+                        name = self.players[sid].get('name', '')
+                        if name:
+                            name_to_pos[(tick_val, name)] = (row.get('X', 0), row.get('Y', 0))
+            
+            # Populate positions for each kill
+            for tick, kills in self.kills_by_tick.items():
+                # Find which round
+                round_num = 1
+                for s, e, n in self.rounds:
+                    if s <= tick <= e:
+                        round_num = n
+                        break
+                
+                # Find closest tick in our sampled data
+                closest_tick = min(self.all_ticks, key=lambda t: abs(t - tick)) if self.all_ticks else tick
+                
+                for k in kills:
+                    victim_name = k.get('victim', '')
+                    attacker_name = k.get('attacker', '')
+                    
+                    # Look up victim position
+                    victim_pos = name_to_pos.get((closest_tick, victim_name))
+                    if victim_pos:
+                        self.death_positions.append({
+                            'x': victim_pos[0],
+                            'y': victim_pos[1],
+                            'team': k.get('victim_team', 'T'),
+                            'round': round_num,
+                            'victim': victim_name,
+                        })
+                    
+                    # Look up attacker position
+                    attacker_pos = name_to_pos.get((closest_tick, attacker_name))
+                    if attacker_pos:
+                        self.kill_positions.append({
+                            'x': attacker_pos[0],
+                            'y': attacker_pos[1],
+                            'team': k.get('attacker_team', 'CT'),
+                            'round': round_num,
+                            'attacker': attacker_name,
+                        })
+            
             print(f"✓ Loaded: {len(self.all_ticks)} ticks, {len(self.rounds)} rounds")
+            print(f"✓ Heatmap: {len(self.kill_positions)} kills, {len(self.death_positions)} deaths")
             print(f"✓ Utility: {len(self.smokes)} smokes, {len(self.mollies)} fires, {len(self.flashes)} flashes, {len(self.he_nades)} HEs")
             return True
             
@@ -431,10 +531,47 @@ class RadarReplayer:
         elif e.key == pygame.K_j:
             self._export_json()
         elif e.key == pygame.K_m:
-            self.show_heatmap = not self.show_heatmap
-            print(f"Heatmap: {'ON' if self.show_heatmap else 'OFF'}")
+            if e.mod & pygame.KMOD_SHIFT:
+                self._export_heatmap()
+            else:
+                self.show_heatmap = not self.show_heatmap
+                self.heatmap_dirty = True
+                print(f"Heatmap: {'ON' if self.show_heatmap else 'OFF'}")
         elif e.key == pygame.K_b:
             self._add_bookmark()
+        elif e.key == pygame.K_c:
+            self._call_ai_coach()
+        elif e.key == pygame.K_t:
+            self.show_trails = not self.show_trails
+            print(f"Player trails: {'ON' if self.show_trails else 'OFF'}")
+        elif e.key == pygame.K_n:
+            if self.heatmap_round_filter is None:
+                self.heatmap_round_filter = self.current_round
+                print(f"Heatmap filter: Round {self.current_round} only")
+            else:
+                self.heatmap_round_filter = None
+                print("Heatmap filter: All rounds")
+            self.heatmap_dirty = True
+        elif e.key == pygame.K_1:
+            self.heatmap_mode = 'all'
+            self.heatmap_dirty = True
+            print("Heatmap mode: ALL events")
+        elif e.key == pygame.K_2:
+            self.heatmap_mode = 'kills'
+            self.heatmap_dirty = True
+            print("Heatmap mode: KILLS only")
+        elif e.key == pygame.K_3:
+            self.heatmap_mode = 'deaths'
+            self.heatmap_dirty = True
+            print("Heatmap mode: DEATHS only")
+        elif e.key == pygame.K_4:
+            self.heatmap_mode = 'ct'
+            self.heatmap_dirty = True
+            print("Heatmap mode: CT events")
+        elif e.key == pygame.K_5:
+            self.heatmap_mode = 't'
+            self.heatmap_dirty = True
+            print("Heatmap mode: T events")
     
     def _take_screenshot(self):
         """Save screenshot to Downloads folder."""
@@ -502,6 +639,178 @@ class RadarReplayer:
         }
         self.bookmarks.append(bookmark)
         print(f"✓ Bookmark added: Round {self.current_round}, Tick {tick} (#{len(self.bookmarks)})")
+    
+    def _export_heatmap(self):
+        """Export current heatmap view as PNG."""
+        from datetime import datetime
+        
+        if not self.show_heatmap:
+            print("✗ Enable heatmap first (press M)")
+            return
+        
+        downloads = Path.home() / "Downloads"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        mode = self.heatmap_mode
+        round_filter = f"_r{self.heatmap_round_filter}" if self.heatmap_round_filter else ""
+        filename = downloads / f"sacrilege_heatmap_{mode}{round_filter}_{timestamp}.png"
+        
+        # Create standalone heatmap image
+        heatmap_size = 800
+        heatmap_surface = pygame.Surface((heatmap_size, heatmap_size))
+        heatmap_surface.fill(Theme.BG)
+        
+        # Draw map background if available
+        if self.map_scaled:
+            scaled_map = pygame.transform.smoothscale(self.map_scaled, (heatmap_size, heatmap_size))
+            heatmap_surface.blit(scaled_map, (0, 0))
+        
+        # Draw heatmap overlay using similar logic
+        scale = heatmap_size / 1024
+        grid_size = 64
+        points = []
+        
+        for d in self.death_positions:
+            if self.heatmap_round_filter and d.get('round') != self.heatmap_round_filter:
+                continue
+            if self.heatmap_mode == 'kills':
+                continue
+            if self.heatmap_mode == 'ct' and d['team'] != 'CT':
+                continue
+            if self.heatmap_mode == 't' and d['team'] != 'T':
+                continue
+            points.append((d['x'], d['y'], d['team'], 'death'))
+        
+        for k in self.kill_positions:
+            if self.heatmap_round_filter and k.get('round') != self.heatmap_round_filter:
+                continue
+            if self.heatmap_mode == 'deaths':
+                continue
+            if self.heatmap_mode == 'ct' and k['team'] != 'CT':
+                continue
+            if self.heatmap_mode == 't' and k['team'] != 'T':
+                continue
+            points.append((k['x'], k['y'], k['team'], 'kill'))
+        
+        if points and self.map_config:
+            overlay = pygame.Surface((heatmap_size, heatmap_size), pygame.SRCALPHA)
+            density = [[0.0] * grid_size for _ in range(grid_size)]
+            cell_size = heatmap_size / grid_size
+            sigma = 2.0
+            
+            for wx, wy, team, event_type in points:
+                px, py = self.map_config.world_to_radar(wx, wy, 1024)
+                gx = int(px * scale / cell_size)
+                gy = int(py * scale / cell_size)
+                
+                for dy in range(-3, 4):
+                    for dx in range(-3, 4):
+                        nx, ny = gx + dx, gy + dy
+                        if 0 <= nx < grid_size and 0 <= ny < grid_size:
+                            dist_sq = dx * dx + dy * dy
+                            weight = math.exp(-dist_sq / (2 * sigma * sigma))
+                            density[ny][nx] += weight
+            
+            max_density = max(max(row) for row in density)
+            if max_density > 0:
+                for gy in range(grid_size):
+                    for gx in range(grid_size):
+                        val = density[gy][gx] / max_density
+                        if val > 0.05:
+                            if val < 0.25:
+                                r, g, b = 0, int(val * 4 * 255), 255
+                            elif val < 0.5:
+                                r, g, b = 0, 255, int((1 - (val - 0.25) * 4) * 255)
+                            elif val < 0.75:
+                                r, g, b = int((val - 0.5) * 4 * 255), 255, 0
+                            else:
+                                r, g, b = 255, int((1 - (val - 0.75) * 4) * 255), 0
+                            
+                            alpha = int(min(180, val * 220 + 40))
+                            x = int(gx * cell_size)
+                            y = int(gy * cell_size)
+                            pygame.draw.rect(overlay, (r, g, b, alpha), 
+                                           (x, y, int(cell_size) + 1, int(cell_size) + 1))
+            
+            heatmap_surface.blit(overlay, (0, 0))
+            
+            # Draw markers
+            for wx, wy, team, event_type in points:
+                px, py = self.map_config.world_to_radar(wx, wy, 1024)
+                x, y = int(px * scale), int(py * scale)
+                
+                if event_type == 'kill':
+                    pygame.draw.line(heatmap_surface, Theme.SUCCESS, (x - 4, y), (x + 4, y), 2)
+                    pygame.draw.line(heatmap_surface, Theme.SUCCESS, (x, y - 4), (x, y + 4), 2)
+                else:
+                    color = Theme.CT if team == 'CT' else Theme.T
+                    pygame.draw.line(heatmap_surface, color, (x - 4, y - 4), (x + 4, y + 4), 2)
+                    pygame.draw.line(heatmap_surface, color, (x + 4, y - 4), (x - 4, y + 4), 2)
+        
+        # Add title
+        title = f"SACRILEGE HEATMAP - {self.map_config.display_name if self.map_config else 'Unknown'}"
+        title_surf = self.font_lg.render(title, True, Theme.WHITE)
+        heatmap_surface.blit(title_surf, (10, 10))
+        
+        pygame.image.save(heatmap_surface, str(filename))
+        print(f"✓ Heatmap exported: {filename}")
+    
+    def _update_player_trails(self, players, tick):
+        """Update trail history for all players."""
+        for p in players:
+            pid = p['id']
+            if p['alive']:
+                if pid not in self.player_trails:
+                    self.player_trails[pid] = []
+                
+                trail = self.player_trails[pid]
+                trail.append((p['x'], p['y'], tick))
+                
+                # Trim old positions
+                while len(trail) > self.trail_length:
+                    trail.pop(0)
+            else:
+                # Clear trail when dead
+                if pid in self.player_trails:
+                    self.player_trails[pid] = []
+    
+    def _draw_player_trails(self, players, rx, ry):
+        """Draw movement trails for all players."""
+        if not self.map_config:
+            return
+        
+        scale = self.radar_size / 1024
+        
+        for p in players:
+            if not p['alive']:
+                continue
+            
+            pid = p['id']
+            if pid not in self.player_trails or len(self.player_trails[pid]) < 2:
+                continue
+            
+            trail = self.player_trails[pid]
+            color = Theme.CT if p['team'] == 'CT' else Theme.T
+            
+            # Draw trail with fading alpha
+            for i in range(1, len(trail)):
+                x1, y1, _ = trail[i - 1]
+                x2, y2, _ = trail[i]
+                
+                px1, py1 = self.map_config.world_to_radar(x1, y1, 1024)
+                px2, py2 = self.map_config.world_to_radar(x2, y2, 1024)
+                
+                sx1, sy1 = rx + int(px1 * scale), ry + int(py1 * scale)
+                sx2, sy2 = rx + int(px2 * scale), ry + int(py2 * scale)
+                
+                # Fade based on position in trail
+                alpha = int(50 + (i / len(trail)) * 150)
+                
+                # Draw line segment with glow
+                trail_surf = pygame.Surface((abs(sx2 - sx1) + 10, abs(sy2 - sy1) + 10), pygame.SRCALPHA)
+                offset_x = min(sx1, sx2) - 5
+                offset_y = min(sy1, sy2) - 5
+                
+                pygame.draw.line(self.screen, (*color[:3], alpha), (sx1, sy1), (sx2, sy2), 2)
     
     def _next_round(self):
         if not self.all_ticks: return
@@ -636,6 +945,11 @@ class RadarReplayer:
                             # Add popup (show for 5 seconds = 320 ticks)
                             self.death_popups.append((analysis, kt + 320))
                             
+                            # Trigger AI analysis (rate limited)
+                            if self.ai_coach and kt - self.ai_last_analysis > 128:  # ~2 seconds
+                                self.ai_last_analysis = kt
+                                self._trigger_ai_analysis(analysis)
+                            
                             # Track death position for heatmap
                             # Get victim's position from players list
                             victim_pos = None
@@ -652,6 +966,18 @@ class RadarReplayer:
                                     'round': self.current_round,
                                     'victim': k['victim'],
                                 })
+                                self.heatmap_dirty = True
+                                
+                                # Also track kill position for attacker
+                                attacker_pos = k.get('attacker_pos')
+                                if attacker_pos:
+                                    self.kill_positions.append({
+                                        'x': attacker_pos.x,
+                                        'y': attacker_pos.y,
+                                        'team': k['attacker_team'],
+                                        'round': self.current_round,
+                                        'attacker': k['attacker'],
+                                    })
         
         # Trim old kills from feed
         self.recent_kills = [k for k in self.recent_kills if tick - k['tick'] < 400]
@@ -752,7 +1078,12 @@ class RadarReplayer:
         self._draw_round_stats(players)
         self._draw_timeline(tick)
         self._draw_legend()
+        
+        if self.ai_coach:
+            self._draw_ai_insights()
         self._draw_death_popups(tick)  # NEW: Death popups on radar
+        self._draw_ai_insights()  # AI Coach insights panel
+        self._poll_ai_responses()  # Check for AI responses
     
     def _render_loading(self):
         # Animated loading
@@ -826,7 +1157,7 @@ class RadarReplayer:
             pygame.draw.circle(self.screen, color, (cx + 35 + i * 18, sy + 38), 5)
     
     def _draw_player_list(self, players):
-        px, py = 12, 115
+        px, py = 20, 115
         pw = 350
         
         # CT Section
@@ -937,7 +1268,7 @@ class RadarReplayer:
             self.screen.blit(self.font_sm.render("✕ ELIMINATED", True, Theme.DANGER), (x + 48, y + 28))
     
     def _draw_radar(self, players, tick):
-        rx, ry = 375, 115
+        rx, ry = 400, 115
         
         # Panel background
         pygame.draw.rect(self.screen, Theme.PANEL, (rx - 10, ry - 10, self.radar_size + 20, self.radar_size + 20), border_radius=8)
@@ -954,6 +1285,11 @@ class RadarReplayer:
         
         # Utility
         self._draw_utility(rx, ry, tick)
+        
+        # Player trails (T key toggle)
+        if self.show_trails:
+            self._update_player_trails(players, tick)
+            self._draw_player_trails(players, rx, ry)
         
         # Heatmap overlay (M key toggle)
         if self.show_heatmap:
@@ -1107,10 +1443,11 @@ class RadarReplayer:
     def _draw_killfeed(self):
         from src.intelligence.death_analyzer import DeathAnalyzer
         
-        kx, ky = self.width - 285, 115
-        kw = 270
+        kx, ky = self.width - 325, 115
+        kw = 310
         
-        pygame.draw.rect(self.screen, Theme.PANEL, (kx - 5, ky - 5, kw + 10, 180), border_radius=6)
+        # Reduced height to 170
+        pygame.draw.rect(self.screen, Theme.PANEL, (kx - 5, ky - 5, kw + 10, 170), border_radius=6)
         self.screen.blit(self.font_sm.render("KILL FEED", True, Theme.GRAY), (kx, ky))
         
         ky += 20
@@ -1145,16 +1482,17 @@ class RadarReplayer:
                         break
     
     def _draw_round_stats(self, players):
-        sx, sy = self.width - 295, 310
-        sw, sh = 280, 180  # Reduced height
+        # Position: 115 + 170 (killfeed) + 10 (gap) = 295
+        sx, sy = self.width - 325, 295
+        sw, sh = 310, 140
         
         pygame.draw.rect(self.screen, Theme.PANEL, (sx - 5, sy, sw + 10, sh), border_radius=6)
         
         # Header
         self.screen.blit(self.font_lg.render("LIVE STATISTICS", True, Theme.ACCENT), (sx + 5, sy + 8))
-        pygame.draw.line(self.screen, Theme.BORDER, (sx, sy + 34), (sx + sw, sy + 34), 1)
+        pygame.draw.line(self.screen, Theme.BORDER, (sx, sy + 30), (sx + sw, sy + 30), 1)
         
-        cy = sy + 42
+        cy = sy + 36
         
         # Round Kills
         self.screen.blit(self.font_md.render("Round Kills", True, Theme.WHITE), (sx + 5, cy))
@@ -1163,7 +1501,7 @@ class RadarReplayer:
         self.screen.blit(self.font_lg.render(ct_k, True, Theme.CT), (sx + 140, cy - 2))
         self.screen.blit(self.font_md.render(":", True, Theme.GRAY), (sx + 170, cy))
         self.screen.blit(self.font_lg.render(t_k, True, Theme.T), (sx + 190, cy - 2))
-        cy += 28
+        cy += 24
         
         # Team HP with bars
         ct_hp = sum(p['hp'] for p in players if p['team'] == 'CT' and p['alive'])
@@ -1172,7 +1510,7 @@ class RadarReplayer:
         self.screen.blit(self.font_md.render(str(ct_hp), True, Theme.CT), (sx + 140, cy))
         self.screen.blit(self.font_md.render(":", True, Theme.GRAY), (sx + 170, cy))
         self.screen.blit(self.font_md.render(str(t_hp), True, Theme.T), (sx + 190, cy))
-        cy += 28
+        cy += 24
         
         # Equipment
         ct_eq = sum(p['equip'] for p in players if p['team'] == 'CT' and p['alive'])
@@ -1180,7 +1518,7 @@ class RadarReplayer:
         self.screen.blit(self.font_md.render("Equipment", True, Theme.WHITE), (sx + 5, cy))
         self.screen.blit(self.font_sm.render(f"${ct_eq}", True, Theme.CT), (sx + 130, cy + 2))
         self.screen.blit(self.font_sm.render(f"${t_eq}", True, Theme.T), (sx + 200, cy + 2))
-        cy += 28
+        cy += 24
         
         # Active Utility
         tick = self.all_ticks[self.tick_idx] if self.all_ticks else 0
@@ -1195,7 +1533,9 @@ class RadarReplayer:
     
     def _draw_timeline(self, tick):
         ty = self.height - 48
-        tx, tw = 380, self.width - 420
+        # Timeline ends before the right panel stack (1275)
+        # 1275 - 380 = 895. Use 880 for safety.
+        tx, tw = 380, 880
         
         # Background
         pygame.draw.rect(self.screen, Theme.PANEL, (tx - 18, ty - 10, tw + 36, 36), border_radius=8)
@@ -1311,6 +1651,12 @@ class RadarReplayer:
                 self.screen.blit(self.font_xs.render(trade, True, trade_color), (box_x + 12, cy))
                 
                 blame = analysis.blame_score()
+                # AI Coach Hint
+                cy += 20
+                if self.ai_coach and self.ai_coach.available:
+                    pygame.draw.rect(self.screen, (100, 50, 255), (box_x + 10, cy + box_y - box_y, box_w - 20, 18), border_radius=4)
+                    self.screen.blit(self.font_xs.render("Press C for AI Coach", True, Theme.WHITE), (box_x + 45, cy + 2))
+
                 blame_color = (100, 200, 100) if blame < 40 else (255, 180, 50) if blame < 60 else (255, 80, 80)
                 self.screen.blit(self.font_xs.render(f"Blame: {blame:.0f}%", True, blame_color), (box_x + 110, cy))
                 
@@ -1330,11 +1676,11 @@ class RadarReplayer:
         
         from src.intelligence.death_analyzer import DeathAnalyzer
         
-        # Panel position - below stats panel
-        px = self.width - 295
-        py = 500
-        pw = 280
-        ph = 200
+        # Panel position - below round stats (stats ends at 295+140=435)
+        px = self.width - 325
+        py = 445 
+        pw = 310
+        ph = 240
         
         pygame.draw.rect(self.screen, Theme.PANEL, (px - 5, py, pw + 10, ph), border_radius=6)
         
@@ -1348,77 +1694,225 @@ class RadarReplayer:
         # Show top 8 players
         for i, stats in enumerate(rankings[:8]):
             # Rank number
-            self.screen.blit(self.font_sm.render(f"#{i+1}", True, Theme.MUTED), (px + 5, cy))
+            self.screen.blit(self.font_md.render(f"#{i+1}", True, Theme.MUTED), (px + 5, cy))
             
             # Grade badge
             grade = stats.rank_grade
             grade_color = DeathAnalyzer.get_grade_color(grade)
-            pygame.draw.rect(self.screen, grade_color, (px + 28, cy + 1, 18, 14), border_radius=3)
-            self.screen.blit(self.font_xs.render(grade, True, (0, 0, 0)), (px + 33, cy + 2))
+            pygame.draw.rect(self.screen, grade_color, (px + 35, cy + 1, 20, 16), border_radius=3)
+            self.screen.blit(self.font_sm.render(grade, True, (0, 0, 0)), (px + 40, cy + 2))
             
             # Name
             name_color = Theme.CT if stats.team == 'CT' else Theme.T
-            self.screen.blit(self.font_sm.render(stats.name[:9], True, name_color), (px + 50, cy))
+            self.screen.blit(self.font_md.render(stats.name[:10], True, name_color), (px + 60, cy))
             
             # K/D
             kd = f"{stats.kills}/{stats.deaths}"
-            self.screen.blit(self.font_sm.render(kd, True, Theme.WHITE), (px + 140, cy))
+            self.screen.blit(self.font_md.render(kd, True, Theme.WHITE), (px + 160, cy))
             
             # Blame score
             blame = stats.avg_blame
+
             blame_color = (100, 200, 100) if blame < 40 else (255, 180, 50) if blame < 60 else (255, 80, 80)
-            self.screen.blit(self.font_xs.render(f"{blame:.0f}%", True, blame_color), (px + 185, cy + 1))
+            self.screen.blit(self.font_sm.render(f"{blame:.0f}%", True, blame_color), (px + 210, cy + 1))
             
             # Performance bar
             perf = min(100, stats.performance_score)
-            bar_w = int(35 * perf / 100)
-            pygame.draw.rect(self.screen, Theme.MUTED, (px + 220, cy + 3, 35, 8), border_radius=2)
+            bar_w = int(40 * perf / 100)
+            pygame.draw.rect(self.screen, Theme.MUTED, (px + 250, cy + 5, 40, 8), border_radius=2)
             if bar_w > 0:
-                pygame.draw.rect(self.screen, grade_color, (px + 220, cy + 3, bar_w, 8), border_radius=2)
+                pygame.draw.rect(self.screen, grade_color, (px + 250, cy + 5, bar_w, 8), border_radius=2)
             
-            cy += 18
+            cy += 24
+
+    def _call_ai_coach(self):
+        """Trigger AI coaching for the latest or selected death."""
+        if not self.ai_coach or not self.ai_coach.available:
+            print("⚠ AI Coach unavailable")
+            return
+        
+        # Get most recent death popup or selected player's last death
+        target_analysis = None
+        
+        if self.death_popups:
+            # Case 1: Active death popup - specific feedback
+            target_analysis = self.death_popups[-1][0]
+            print(f"⚡ Asking Qwen to review death for {target_analysis.victim_name}...")
+            prompt = self.death_analyzer.get_llm_prompt(target_analysis)
+            
+        elif self.selected_player and self.death_analyzer:
+            # Case 2: No popup, player selected - DEEP ANALYSIS
+            stats = self.death_analyzer.player_stats.get(self.selected_player)
+            if not stats:
+                print(f"⚠ No stats found for {self.selected_player}")
+                return
+                
+            print(f"⚡ Asking Qwen for deep analysis on {self.selected_player}...")
+            prompt = self.death_analyzer.get_player_analysis_prompt(stats)
+            
+        else:
+            print("⚠ Select a player or wait for a death to coach")
+            return
+        
+        # Define callback
+        def on_response(text):
+            print(f"⚡ Coach says: {text}")
+            # Add to insights list to display on screen
+            expire = self.all_ticks[self.tick_idx] + 1280 # Show for 20 seconds (longer for analysis)
+            self.ai_insights.append(('coach', text, expire))
+            
+        # Call LLM async
+        self.ai_coach.generate_async(
+            prompt, 
+            on_response, 
+            system_prompt=self.ai_coach.get_coach_persona()
+        )
 
     def _draw_heatmap_overlay(self, rx, ry):
-        """Draw death positions as heatmap overlay."""
+        """Draw enhanced heatmap with KDE density visualization."""
         if not self.map_config:
             return
         
         scale = self.radar_size / 1024
+        grid_size = 64  # Density grid resolution
         
-        # Create semi-transparent overlay
+        # Gather points based on filter mode
+        points = []
+        
+        # Filter deaths
+        if self.heatmap_mode in ('all', 'deaths', 'ct', 't'):
+            for d in self.death_positions:
+                if self.heatmap_round_filter and d.get('round') != self.heatmap_round_filter:
+                    continue
+                if self.heatmap_mode == 'ct' and d['team'] != 'CT':
+                    continue
+                if self.heatmap_mode == 't' and d['team'] != 'T':
+                    continue
+                if self.heatmap_mode != 'kills':  # Skip deaths in kills-only mode
+                    points.append((d['x'], d['y'], d['team'], 'death'))
+        
+        # Filter kills
+        if self.heatmap_mode in ('all', 'kills', 'ct', 't'):
+            for k in self.kill_positions:
+                if self.heatmap_round_filter and k.get('round') != self.heatmap_round_filter:
+                    continue
+                if self.heatmap_mode == 'ct' and k['team'] != 'CT':
+                    continue
+                if self.heatmap_mode == 't' and k['team'] != 'T':
+                    continue
+                if self.heatmap_mode != 'deaths':  # Skip kills in deaths-only mode
+                    points.append((k['x'], k['y'], k['team'], 'kill'))
+        
+        # Create overlay surface
         overlay = pygame.Surface((self.radar_size, self.radar_size), pygame.SRCALPHA)
         
-        # Draw each death position
-        for death in self.death_positions:
-            px, py = self.map_config.world_to_radar(death['x'], death['y'], 1024)
-            x, y = int(px * scale), int(py * scale)
+        if points:
+            # Build density grid with Gaussian blur approximation
+            density = [[0.0] * grid_size for _ in range(grid_size)]
+            cell_size = self.radar_size / grid_size
+            sigma = 2.0  # Spread factor
             
-            # Color by team
-            if death['team'] == 'CT':
-                color = (*Theme.CT[:3], 100)
-                glow = (*Theme.CT[:3], 40)
-            else:
-                color = (*Theme.T[:3], 100)
-                glow = (*Theme.T[:3], 40)
+            for wx, wy, team, event_type in points:
+                px, py = self.map_config.world_to_radar(wx, wy, 1024)
+                gx = int(px * scale / cell_size)
+                gy = int(py * scale / cell_size)
+                
+                # Add Gaussian contribution to nearby cells
+                for dy in range(-3, 4):
+                    for dx in range(-3, 4):
+                        nx, ny = gx + dx, gy + dy
+                        if 0 <= nx < grid_size and 0 <= ny < grid_size:
+                            dist_sq = dx * dx + dy * dy
+                            weight = math.exp(-dist_sq / (2 * sigma * sigma))
+                            density[ny][nx] += weight
             
-            # Draw glow
-            pygame.draw.circle(overlay, glow, (x, y), 18)
-            pygame.draw.circle(overlay, color, (x, y), 10)
-        
-        # If no deaths yet, show message
-        if not self.death_positions:
-            text = self.font_md.render("No deaths recorded yet", True, Theme.GRAY)
+            # Find max density for normalization
+            max_density = max(max(row) for row in density)
+            if max_density > 0:
+                # Draw density cells with color gradient
+                for gy in range(grid_size):
+                    for gx in range(grid_size):
+                        val = density[gy][gx] / max_density
+                        if val > 0.05:  # Threshold to avoid too much noise
+                            # Color gradient: blue -> cyan -> green -> yellow -> red
+                            if val < 0.25:
+                                r = 0
+                                g = int(val * 4 * 255)
+                                b = 255
+                            elif val < 0.5:
+                                r = 0
+                                g = 255
+                                b = int((1 - (val - 0.25) * 4) * 255)
+                            elif val < 0.75:
+                                r = int((val - 0.5) * 4 * 255)
+                                g = 255
+                                b = 0
+                            else:
+                                r = 255
+                                g = int((1 - (val - 0.75) * 4) * 255)
+                                b = 0
+                            
+                            alpha = int(min(180, val * 220 + 40))
+                            x = int(gx * cell_size)
+                            y = int(gy * cell_size)
+                            pygame.draw.rect(overlay, (r, g, b, alpha), 
+                                           (x, y, int(cell_size) + 1, int(cell_size) + 1))
+            
+            # Draw actual event markers on top
+            for wx, wy, team, event_type in points:
+                px, py = self.map_config.world_to_radar(wx, wy, 1024)
+                x, y = int(px * scale), int(py * scale)
+                
+                if event_type == 'kill':
+                    # Green crosshair for kills
+                    color = Theme.SUCCESS
+                    pygame.draw.line(overlay, (*color, 200), (x - 4, y), (x + 4, y), 2)
+                    pygame.draw.line(overlay, (*color, 200), (x, y - 4), (x, y + 4), 2)
+                else:
+                    # X mark for deaths with team color
+                    color = Theme.CT if team == 'CT' else Theme.T
+                    pygame.draw.line(overlay, (*color, 200), (x - 4, y - 4), (x + 4, y + 4), 2)
+                    pygame.draw.line(overlay, (*color, 200), (x + 4, y - 4), (x - 4, y + 4), 2)
+        else:
+            # No events message
+            text = self.font_md.render("No events recorded yet", True, Theme.GRAY)
             overlay.blit(text, (self.radar_size // 2 - text.get_width() // 2, 20))
         
         # Blit overlay
         self.screen.blit(overlay, (rx, ry))
         
-        # Draw legend
-        pygame.draw.rect(self.screen, (*Theme.PANEL[:3], 200), (rx + 5, ry + 5, 140, 50), border_radius=6)
-        pygame.draw.circle(self.screen, Theme.CT, (rx + 20, ry + 20), 6)
-        self.screen.blit(self.font_sm.render("CT Deaths", True, Theme.CT), (rx + 32, ry + 14))
-        pygame.draw.circle(self.screen, Theme.T, (rx + 20, ry + 40), 6)
-        self.screen.blit(self.font_sm.render("T Deaths", True, Theme.T), (rx + 32, ry + 34))
+        # Draw enhanced legend
+        legend_h = 95
+        pygame.draw.rect(self.screen, (*Theme.PANEL[:3], 220), (rx + 5, ry + 5, 160, legend_h), border_radius=6)
+        
+        # Mode indicator
+        mode_labels = {'all': 'ALL', 'kills': 'KILLS', 'deaths': 'DEATHS', 'ct': 'CT', 't': 'T'}
+        mode_txt = f"Mode: {mode_labels.get(self.heatmap_mode, 'ALL')}"
+        self.screen.blit(self.font_sm.render(mode_txt, True, Theme.ACCENT), (rx + 12, ry + 10))
+        
+        # Round filter indicator
+        if self.heatmap_round_filter:
+            round_txt = f"Round: {self.heatmap_round_filter}"
+        else:
+            round_txt = "Round: ALL"
+        self.screen.blit(self.font_xs.render(round_txt, True, Theme.MUTED), (rx + 100, ry + 12))
+        
+        # Legend items
+        pygame.draw.line(self.screen, Theme.SUCCESS, (rx + 15, ry + 35), (rx + 23, ry + 35), 2)
+        pygame.draw.line(self.screen, Theme.SUCCESS, (rx + 19, ry + 31), (rx + 19, ry + 39), 2)
+        self.screen.blit(self.font_sm.render(f"Kills ({len(self.kill_positions)})", True, Theme.SUCCESS), (rx + 30, ry + 28))
+        
+        pygame.draw.line(self.screen, Theme.CT, (rx + 15, ry + 51), (rx + 23, ry + 59), 2)
+        pygame.draw.line(self.screen, Theme.CT, (rx + 23, ry + 51), (rx + 15, ry + 59), 2)
+        self.screen.blit(self.font_sm.render("CT Deaths", True, Theme.CT), (rx + 30, ry + 48))
+        
+        pygame.draw.line(self.screen, Theme.T, (rx + 15, ry + 71), (rx + 23, ry + 79), 2)
+        pygame.draw.line(self.screen, Theme.T, (rx + 23, ry + 71), (rx + 15, ry + 79), 2)
+        self.screen.blit(self.font_sm.render("T Deaths", True, Theme.T), (rx + 30, ry + 68))
+        
+        # Stats
+        stats_txt = f"{len(points)} events"
+        self.screen.blit(self.font_xs.render(stats_txt, True, Theme.MUTED), (rx + 100, ry + 78))
 
     def _draw_legend(self):
         ly = self.height - 22
@@ -1439,8 +1933,89 @@ class RadarReplayer:
             lx += txt.get_width() + 50
         
         # Controls hint - LARGER
-        hint = "SPACE: Play  |  ←→: Seek  |  ↑↓: Speed  |  E/R: Round  |  F12: Screenshot  |  H: Help"
-        self.screen.blit(self.font_md.render(hint, True, Theme.GRAY), (350, ly - 8))
+        hint = "SPACE: Play  ←→: Seek  ↑↓: Speed  E/R: Round  M: Heatmap  T: Trails  1-5: Mode  N: Filter"
+        self.screen.blit(self.font_md.render(hint, True, Theme.GRAY), (280, ly - 8))
+    
+    def _draw_ai_insights(self):
+        """Draw AI coaching tips window."""
+        # Panel position - below Live Rankings (which ends at 445+240=685)
+        px = self.width - 325
+        py = 695
+        pw = 310
+        ph = 220
+        
+        # Panel background with glow
+        surf = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        pygame.draw.rect(surf, (*Theme.PANEL[:3], 245), (0, 0, pw, ph), border_radius=8)
+        pygame.draw.rect(surf, Theme.ACCENT, (0, 0, pw, ph), 2, border_radius=8)
+        self.screen.blit(surf, (px, py))
+        
+        # Header
+        self.screen.blit(self.font_lg.render("AI COACH", True, Theme.ACCENT), (px + 15, py + 12))
+        
+        # Model indicator
+        if self.ai_coach:
+            model = self.ai_coach.model.split(':')[0].upper()
+            self.screen.blit(self.font_xs.render(model, True, Theme.MUTED), (px + pw - 60, py + 16))
+        
+        # Show latest insight
+        if self.ai_insights:
+            insight_type, text, _ = self.ai_insights[-1]
+            
+            # Wrap text
+            words = text.split()
+            lines = []
+            current_line = ""
+            for word in words:
+                test = current_line + " " + word if current_line else word
+                if self.font_md.size(test)[0] < pw - 30:
+                    current_line = test
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            if current_line:
+                lines.append(current_line)
+            
+            # Draw lines (max 8)
+            y = py + 50
+            for line in lines[:8]:
+                self.screen.blit(self.font_md.render(line, True, Theme.WHITE), (px + 15, y))
+                y += 24
+        else:
+            # Centered Placeholder
+            cx = px + pw // 2
+            cy = py + ph // 2 - 20
+            
+            # Pulsing waiting text
+            pulse = abs(math.sin(self.frame * 0.05)) * 100
+            wait_color = (130 + pulse, 130 + pulse, 130 + pulse)
+            wait_txt = self.font_md.render("Waiting for analysis...", True, wait_color)
+            self.screen.blit(wait_txt, (cx - wait_txt.get_width()//2, cy - 20))
+            
+            # Centered Pill
+            pill_w = 200
+            pill_h = 28
+            pill_x = cx - pill_w // 2
+            pill_y = cy + 15
+            
+            pygame.draw.rect(self.screen, Theme.ACCENT2, (pill_x, pill_y, pill_w, pill_h), border_radius=14)
+            
+            # Pill text
+            hint_txt = self.font_sm.render("Press C to Coach Death", True, Theme.WHITE)
+            self.screen.blit(hint_txt, (pill_x + (pill_w - hint_txt.get_width())//2, pill_y + 6))
+    
+    def _poll_ai_responses(self):
+        """Clean expired insights."""
+        # Clean expired insights
+        if self.ai_coach and self.all_ticks:
+            tick = self.all_ticks[self.tick_idx]
+            self.ai_insights = [(t, txt, exp) for t, txt, exp in self.ai_insights if exp > tick]
+    
+    def _trigger_ai_analysis(self, analysis):
+        """Trigger AI analysis for a death."""
+        # Auto-analysis disabled in favor of manual 'C' key to save resources
+        pass
 
 
 def main():

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Tuple, Dict
 import math
+from .llm_client import LLMClient
 
 
 class MistakeType(Enum):
@@ -482,6 +483,68 @@ class DeathAnalyzer:
             MistakeType.FAIR_DUEL: (150, 150, 150),
         }
         return colors.get(mistake, (200, 200, 200))
+    
+    def get_llm_prompt(self, analysis: DeathAnalysis) -> str:
+        """Construct a context-rich prompt for the local LLM."""
+        
+        mistake = analysis.primary_mistake()
+        mistake_label = self.get_mistake_label(mistake)
+        
+        context = f"""
+        Player: {analysis.victim_name} ({analysis.victim_team})
+        Map Situation:
+        - Died to: {analysis.attacker_name}
+        - Primary Error: {mistake_label} (Severity: {analysis.severity}/5)
+        - Teammate Support: {int(analysis.teammate_distance)} units away ({analysis.teammate_count} nearby)
+        - Enemies: Faced {analysis.enemy_count} opponents
+        - Traded: {"Yes" if analysis.was_traded else "No"}
+        - Flashed: {"Yes" if analysis.was_flashed else "No"}
+        
+        Detailed Context:
+        The player made a {mistake_label} error.
+        {' '.join(analysis.reasons)}
+        
+        Task:
+        Coach {analysis.victim_name} directly. You MUST start your response by addressing them by name (e.g., "{analysis.victim_name}, you...").
+        Explain clearly what they did wrong ({mistake_label}) and how to fix it next round of this CS2 match.
+        Keep it sharp, tactical, and under 40 words.
+        """
+        return context
+    
+    def get_player_analysis_prompt(self, player_stats: PlayerStats) -> str:
+        """Construct a deep analytical review prompt for a specific player."""
+        
+        # Identify top mistakes
+        mistakes = sorted(player_stats.mistake_counts.items(), key=lambda x: -x[1])
+        top_mistakes = [f"{m[0].upper()} ({c}x)" for m, c in mistakes[:3]]
+        
+        # Find worst death (highest severity)
+        worst_death = None
+        if player_stats.death_analyses:
+            worst_death = max(player_stats.death_analyses, key=lambda d: d.severity)
+            
+        context = f"""
+        Player: {player_stats.name} ({player_stats.team})
+        Overall Performance:
+        - Grade: {player_stats.rank_grade} (Score: {player_stats.performance_score:.1f})
+        - K/D: {player_stats.kills}/{player_stats.deaths}
+        - Tactical Discipline (Blame): {player_stats.avg_blame:.0f}% (Lower is better)
+        
+        Recurring Issues:
+        {', '.join(top_mistakes) if top_mistakes else "None detected yet."}
+        
+        Worst Mistake Example:
+        {f"Died to {worst_death.attacker_name} due to {self.get_mistake_label(worst_death.primary_mistake())}" if worst_death else "N/A"}
+        
+        Task:
+        Provide a professional tactical analysis for {player_stats.name}.
+        1. Address them by name.
+        2. Analyze their biggest weakness based on the recurring mistakes.
+        3. Give 2 specific, high-level improvements to raise their Grade.
+        4. Be brutally honest but constructive. Max 50 words.
+        """
+        return context
+
     
     @staticmethod
     def get_grade_color(grade: str) -> Tuple[int, int, int]:

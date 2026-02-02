@@ -139,6 +139,10 @@ git clone https://github.com/Pl4yer-ONE/Sacrilege_Engine.git
 cd Sacrilege_Engine
 python -m venv venv && source venv/bin/activate
 pip install -e .
+
+# Optional: Install Ollama for AI Coach features
+# https://ollama.com/download
+# ollama pull qwen2.5
 ```
 
 ### B. Usage
@@ -157,6 +161,8 @@ python radar/radar_replayer.py "path/to/demo.dem"
 | `E` `R` | Previous / Next round |
 | `M` | Toggle heatmap overlay |
 | `B` | Add bookmark |
+| `C` | **AI Coach Analysis** |
+| `T` | Toggle Player Trails |
 | `J` | Export to JSON |
 | `F12` | Screenshot to Downloads |
 | `H` | Help overlay |
