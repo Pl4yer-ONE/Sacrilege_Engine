@@ -327,7 +327,7 @@ class RadarReplayer:
             
             print(f"✓ Extracted {len(kill_events)} kills")
             
-            # Tick data
+            # Tick data - get ALL ticks first, then sample for playback but keep kill ticks
             print("Extracting positions...")
             dp2 = DP2(str(demo_path))
             data = dp2.parse_ticks([
@@ -336,11 +336,19 @@ class RadarReplayer:
                 "current_equip_value", "active_weapon_name"
             ])
             
+            # Get all kill ticks for accurate heatmap
+            kill_ticks = set(self.kills_by_tick.keys())
+            
             if isinstance(data, pd.DataFrame):
                 ticks = sorted(data['tick'].unique())
-                sampled = ticks[::4]
-                self.tick_df = data[data['tick'].isin(sampled)]
+                # Sample every 4th tick for playback, but INCLUDE all kill ticks
+                sampled = set(ticks[::4])
+                required_ticks = sampled | kill_ticks
+                self.tick_df = data[data['tick'].isin(required_ticks)]
                 self.all_ticks = sorted(self.tick_df['tick'].unique())
+                
+                # Keep full data for kill tick lookups (steamid -> position at each tick)
+                self.full_tick_data = data
             
             # Utility
             print("Extracting utility...")
@@ -366,19 +374,13 @@ class RadarReplayer:
                 print(f"⚠ AI Coach init failed: {e}")
                 self.ai_coach = None
             
-            # Pre-populate kill/death positions by looking up positions from tick data
-            # Build a name-to-latest-position cache from tick data
-            name_to_pos = {}
-            for tick_val in sorted(self.tick_df['tick'].unique()):
-                tick_data = self.tick_df[self.tick_df['tick'] == tick_val]
-                for _, row in tick_data.iterrows():
-                    sid = str(row.get('steamid', ''))
-                    if sid in self.players:
-                        name = self.players[sid].get('name', '')
-                        if name:
-                            name_to_pos[(tick_val, name)] = (row.get('X', 0), row.get('Y', 0))
+            # Pre-populate kill/death positions using EXACT tick data and steamid matching
+            # Build steamid to name mapping
+            steamid_to_name = {}
+            for sid, info in self.players.items():
+                steamid_to_name[sid] = info.get('name', '')
             
-            # Populate positions for each kill
+            # Process each kill event with accurate position data
             for tick, kills in self.kills_by_tick.items():
                 # Find which round
                 round_num = 1
@@ -387,34 +389,56 @@ class RadarReplayer:
                         round_num = n
                         break
                 
-                # Find closest tick in our sampled data
-                closest_tick = min(self.all_ticks, key=lambda t: abs(t - tick)) if self.all_ticks else tick
-                
-                for k in kills:
-                    victim_name = k.get('victim', '')
-                    attacker_name = k.get('attacker', '')
+                # Get position data at EXACT kill tick (or closest available)
+                if hasattr(self, 'full_tick_data') and self.full_tick_data is not None:
+                    # Find closest available tick
+                    available = self.full_tick_data['tick'].unique()
+                    closest_tick = min(available, key=lambda t: abs(t - tick))
+                    tick_data = self.full_tick_data[self.full_tick_data['tick'] == closest_tick]
                     
-                    # Look up victim position
-                    victim_pos = name_to_pos.get((closest_tick, victim_name))
-                    if victim_pos:
-                        self.death_positions.append({
-                            'x': victim_pos[0],
-                            'y': victim_pos[1],
-                            'team': k.get('victim_team', 'T'),
-                            'round': round_num,
-                            'victim': victim_name,
-                        })
+                    # Build steamid -> position map for this tick
+                    sid_to_pos = {}
+                    for _, row in tick_data.iterrows():
+                        sid = str(row.get('steamid', ''))
+                        sid_to_pos[sid] = (float(row.get('X', 0)), float(row.get('Y', 0)))
                     
-                    # Look up attacker position
-                    attacker_pos = name_to_pos.get((closest_tick, attacker_name))
-                    if attacker_pos:
-                        self.kill_positions.append({
-                            'x': attacker_pos[0],
-                            'y': attacker_pos[1],
-                            'team': k.get('attacker_team', 'CT'),
-                            'round': round_num,
-                            'attacker': attacker_name,
-                        })
+                    for k in kills:
+                        # Get victim steamid from kill event
+                        victim_name = k.get('victim', '')
+                        attacker_name = k.get('attacker', '')
+                        
+                        # Find steamids by name (reverse lookup)
+                        victim_sid = None
+                        attacker_sid = None
+                        for sid, name in steamid_to_name.items():
+                            if name == victim_name:
+                                victim_sid = sid
+                            if name == attacker_name:
+                                attacker_sid = sid
+                        
+                        # Look up victim position by steamid
+                        if victim_sid and victim_sid in sid_to_pos:
+                            pos = sid_to_pos[victim_sid]
+                            if pos[0] != 0 or pos[1] != 0:  # Skip zero positions
+                                self.death_positions.append({
+                                    'x': pos[0],
+                                    'y': pos[1],
+                                    'team': k.get('victim_team', 'T'),
+                                    'round': round_num,
+                                    'victim': victim_name,
+                                })
+                        
+                        # Look up attacker position by steamid
+                        if attacker_sid and attacker_sid in sid_to_pos:
+                            pos = sid_to_pos[attacker_sid]
+                            if pos[0] != 0 or pos[1] != 0:  # Skip zero positions
+                                self.kill_positions.append({
+                                    'x': pos[0],
+                                    'y': pos[1],
+                                    'team': k.get('attacker_team', 'CT'),
+                                    'round': round_num,
+                                    'attacker': attacker_name,
+                                })
             
             print(f"✓ Loaded: {len(self.all_ticks)} ticks, {len(self.rounds)} rounds")
             print(f"✓ Heatmap: {len(self.kill_positions)} kills, {len(self.death_positions)} deaths")
@@ -1769,15 +1793,15 @@ class RadarReplayer:
         )
 
     def _draw_heatmap_overlay(self, rx, ry):
-        """Draw enhanced heatmap with KDE density visualization."""
+        """Draw PRECISE heatmap - only exact event positions, no interpolation."""
         if not self.map_config:
             return
         
         scale = self.radar_size / 1024
-        grid_size = 64  # Density grid resolution
         
         # Gather points based on filter mode
-        points = []
+        death_points = []
+        kill_points = []
         
         # Filter deaths
         if self.heatmap_mode in ('all', 'deaths', 'ct', 't'):
@@ -1788,8 +1812,8 @@ class RadarReplayer:
                     continue
                 if self.heatmap_mode == 't' and d['team'] != 'T':
                     continue
-                if self.heatmap_mode != 'kills':  # Skip deaths in kills-only mode
-                    points.append((d['x'], d['y'], d['team'], 'death'))
+                if self.heatmap_mode != 'kills':
+                    death_points.append((d['x'], d['y'], d['team'], d.get('victim', '')))
         
         # Filter kills
         if self.heatmap_mode in ('all', 'kills', 'ct', 't'):
@@ -1800,119 +1824,63 @@ class RadarReplayer:
                     continue
                 if self.heatmap_mode == 't' and k['team'] != 'T':
                     continue
-                if self.heatmap_mode != 'deaths':  # Skip kills in deaths-only mode
-                    points.append((k['x'], k['y'], k['team'], 'kill'))
+                if self.heatmap_mode != 'deaths':
+                    kill_points.append((k['x'], k['y'], k['team'], k.get('attacker', '')))
         
         # Create overlay surface
         overlay = pygame.Surface((self.radar_size, self.radar_size), pygame.SRCALPHA)
         
-        if points:
-            # Build density grid with Gaussian blur approximation
-            density = [[0.0] * grid_size for _ in range(grid_size)]
-            cell_size = self.radar_size / grid_size
-            sigma = 2.0  # Spread factor
-            
-            for wx, wy, team, event_type in points:
-                px, py = self.map_config.world_to_radar(wx, wy, 1024)
-                gx = int(px * scale / cell_size)
-                gy = int(py * scale / cell_size)
-                
-                # Add Gaussian contribution to nearby cells
-                for dy in range(-3, 4):
-                    for dx in range(-3, 4):
-                        nx, ny = gx + dx, gy + dy
-                        if 0 <= nx < grid_size and 0 <= ny < grid_size:
-                            dist_sq = dx * dx + dy * dy
-                            weight = math.exp(-dist_sq / (2 * sigma * sigma))
-                            density[ny][nx] += weight
-            
-            # Find max density for normalization
-            max_density = max(max(row) for row in density)
-            if max_density > 0:
-                # Draw density cells with color gradient
-                for gy in range(grid_size):
-                    for gx in range(grid_size):
-                        val = density[gy][gx] / max_density
-                        if val > 0.05:  # Threshold to avoid too much noise
-                            # Color gradient: blue -> cyan -> green -> yellow -> red
-                            if val < 0.25:
-                                r = 0
-                                g = int(val * 4 * 255)
-                                b = 255
-                            elif val < 0.5:
-                                r = 0
-                                g = 255
-                                b = int((1 - (val - 0.25) * 4) * 255)
-                            elif val < 0.75:
-                                r = int((val - 0.5) * 4 * 255)
-                                g = 255
-                                b = 0
-                            else:
-                                r = 255
-                                g = int((1 - (val - 0.75) * 4) * 255)
-                                b = 0
-                            
-                            alpha = int(min(180, val * 220 + 40))
-                            x = int(gx * cell_size)
-                            y = int(gy * cell_size)
-                            pygame.draw.rect(overlay, (r, g, b, alpha), 
-                                           (x, y, int(cell_size) + 1, int(cell_size) + 1))
-            
-            # Draw actual event markers on top
-            for wx, wy, team, event_type in points:
+        total_events = len(death_points) + len(kill_points)
+        
+        if total_events > 0:
+            # Draw DEATH markers - X marks with outer glow
+            for wx, wy, team, name in death_points:
                 px, py = self.map_config.world_to_radar(wx, wy, 1024)
                 x, y = int(px * scale), int(py * scale)
                 
-                if event_type == 'kill':
-                    # Green crosshair for kills
-                    color = Theme.SUCCESS
-                    pygame.draw.line(overlay, (*color, 200), (x - 4, y), (x + 4, y), 2)
-                    pygame.draw.line(overlay, (*color, 200), (x, y - 4), (x, y + 4), 2)
+                # Team color
+                if team == 'CT':
+                    color = (100, 180, 255)  # CT blue
+                    glow_color = (60, 120, 200, 80)
                 else:
-                    # X mark for deaths with team color
-                    color = Theme.CT if team == 'CT' else Theme.T
-                    pygame.draw.line(overlay, (*color, 200), (x - 4, y - 4), (x + 4, y + 4), 2)
-                    pygame.draw.line(overlay, (*color, 200), (x + 4, y - 4), (x - 4, y + 4), 2)
+                    color = (255, 180, 80)  # T orange/gold
+                    glow_color = (200, 120, 40, 80)
+                
+                # Outer glow ring
+                pygame.draw.circle(overlay, glow_color, (x, y), 8)
+                pygame.draw.circle(overlay, (*color, 150), (x, y), 5)
+                
+                # X mark
+                pygame.draw.line(overlay, (*color, 255), (x - 4, y - 4), (x + 4, y + 4), 2)
+                pygame.draw.line(overlay, (*color, 255), (x + 4, y - 4), (x - 4, y + 4), 2)
+            
+            # Draw KILL markers - Diamond with inner dot
+            for wx, wy, team, name in kill_points:
+                px, py = self.map_config.world_to_radar(wx, wy, 1024)
+                x, y = int(px * scale), int(py * scale)
+                
+                # Green for kills
+                color = (80, 255, 120)
+                glow_color = (40, 180, 80, 100)
+                
+                # Outer glow
+                pygame.draw.circle(overlay, glow_color, (x, y), 7)
+                
+                # Diamond shape
+                pts = [(x, y - 5), (x + 5, y), (x, y + 5), (x - 5, y)]
+                pygame.draw.polygon(overlay, (*color, 200), pts)
+                pygame.draw.polygon(overlay, (255, 255, 255, 255), pts, 1)
+                
+                # Center dot
+                pygame.draw.circle(overlay, (255, 255, 255, 255), (x, y), 2)
         else:
-            # No events message
-            text = self.font_md.render("No events recorded yet", True, Theme.GRAY)
-            overlay.blit(text, (self.radar_size // 2 - text.get_width() // 2, 20))
+            # Empty state
+            center_y = self.radar_size // 2
+            text = self.font_md.render("No events to display", True, Theme.MUTED)
+            overlay.blit(text, (self.radar_size // 2 - text.get_width() // 2, center_y - 10))
         
         # Blit overlay
         self.screen.blit(overlay, (rx, ry))
-        
-        # Draw enhanced legend
-        legend_h = 95
-        pygame.draw.rect(self.screen, (*Theme.PANEL[:3], 220), (rx + 5, ry + 5, 160, legend_h), border_radius=6)
-        
-        # Mode indicator
-        mode_labels = {'all': 'ALL', 'kills': 'KILLS', 'deaths': 'DEATHS', 'ct': 'CT', 't': 'T'}
-        mode_txt = f"Mode: {mode_labels.get(self.heatmap_mode, 'ALL')}"
-        self.screen.blit(self.font_sm.render(mode_txt, True, Theme.ACCENT), (rx + 12, ry + 10))
-        
-        # Round filter indicator
-        if self.heatmap_round_filter:
-            round_txt = f"Round: {self.heatmap_round_filter}"
-        else:
-            round_txt = "Round: ALL"
-        self.screen.blit(self.font_xs.render(round_txt, True, Theme.MUTED), (rx + 100, ry + 12))
-        
-        # Legend items
-        pygame.draw.line(self.screen, Theme.SUCCESS, (rx + 15, ry + 35), (rx + 23, ry + 35), 2)
-        pygame.draw.line(self.screen, Theme.SUCCESS, (rx + 19, ry + 31), (rx + 19, ry + 39), 2)
-        self.screen.blit(self.font_sm.render(f"Kills ({len(self.kill_positions)})", True, Theme.SUCCESS), (rx + 30, ry + 28))
-        
-        pygame.draw.line(self.screen, Theme.CT, (rx + 15, ry + 51), (rx + 23, ry + 59), 2)
-        pygame.draw.line(self.screen, Theme.CT, (rx + 23, ry + 51), (rx + 15, ry + 59), 2)
-        self.screen.blit(self.font_sm.render("CT Deaths", True, Theme.CT), (rx + 30, ry + 48))
-        
-        pygame.draw.line(self.screen, Theme.T, (rx + 15, ry + 71), (rx + 23, ry + 79), 2)
-        pygame.draw.line(self.screen, Theme.T, (rx + 23, ry + 71), (rx + 15, ry + 79), 2)
-        self.screen.blit(self.font_sm.render("T Deaths", True, Theme.T), (rx + 30, ry + 68))
-        
-        # Stats
-        stats_txt = f"{len(points)} events"
-        self.screen.blit(self.font_xs.render(stats_txt, True, Theme.MUTED), (rx + 100, ry + 78))
 
     def _draw_legend(self):
         ly = self.height - 22
