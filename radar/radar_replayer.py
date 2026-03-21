@@ -192,6 +192,7 @@ class RadarReplayer:
         
         # State
         self.demo_data = None
+        self.demo_path = None  # Track loaded demo path
         self.map_config = None
         self.map_image = None
         self.map_scaled = None
@@ -208,6 +209,7 @@ class RadarReplayer:
         self.rounds: List[tuple] = []
         self.kills_by_tick: Dict[int, list] = {}
         self.current_round = 1
+        self.round_wins = {'CT': 0, 'T': 0}  # Track round wins
         
         # Utility
         self.smokes = []
@@ -239,7 +241,7 @@ class RadarReplayer:
         # New Features v1.4
         self.show_heatmap = False  # M key toggle
         self.death_positions = []  # [(x, y, team, round)]
-        self.kill_positions = []  # [(x, y, team, round)] - NEW
+        self.kill_positions = []  # [(x, y, team, round)]
         self.bookmarks = []  # [(tick, reason, data)]
         self.selected_player = None  # Clicked player card
         self.player_detail_mode = False
@@ -260,10 +262,99 @@ class RadarReplayer:
         self.ai_insights = []  # List of (type, text, expire_time)
         self.ai_last_analysis = 0  # Tick of last analysis
         
+        # Per-frame cache
+        self._cached_rankings = []
+        
+    def _reset_state(self):
+        """Reset all playback state for loading a new demo."""
+        self.demo_data = None
+        self.map_config = None
+        self.map_image = None
+        self.map_scaled = None
+        self.is_playing = False
+        self.tick_df = None
+        self.all_ticks = []
+        self.tick_idx = 0
+        self.players = {}
+        self.rounds = []
+        self.kills_by_tick = {}
+        self.current_round = 1
+        self.round_wins = {'CT': 0, 'T': 0}
+        self.smokes = []
+        self.mollies = []
+        self.flashes = []
+        self.he_nades = []
+        self.round_kills = {'CT': 0, 'T': 0}
+        self.total_kills = {'CT': 0, 'T': 0}
+        self.recent_kills = []
+        self.kill_animations = []
+        self.death_analyzer = None
+        self.death_popups = []
+        self.analyzed_kills = set()
+        self.death_positions = []
+        self.kill_positions = []
+        self.bookmarks = []
+        self.selected_player = None
+        self.heatmap_dirty = True
+        self.player_trails = {}
+        self.ai_insights = []
+        self._cached_rankings = []
+    
+    def _open_file_dialog(self):
+        """Open a native file dialog using a subprocess to avoid Tkinter/Pygame macOS conflicts."""
+        import subprocess
+        import sys
+        
+        # Default to demo files directory
+        initial_dir = str(Path(__file__).parent.parent / 'demo files')
+        if not Path(initial_dir).exists():
+            initial_dir = str(Path.home())
+            
+        script = f'''
+import tkinter as tk
+from tkinter import filedialog
+import sys
+
+root = tk.Tk()
+root.withdraw()
+root.attributes('-topmost', True)
+
+filepath = filedialog.askopenfilename(
+    title="Open CS2 Demo File",
+    initialdir={repr(initial_dir)},
+    filetypes=[
+        ("CS2 Demo Files", "*.dem"),
+        ("All Files", "*.*"),
+    ],
+)
+if filepath:
+    print(filepath)
+'''
+        try:
+            # Run the tkinter dialog in an isolated process
+            result = subprocess.run(
+                [sys.executable, '-c', script],
+                capture_output=True,
+                text=True
+            )
+            
+            filepath = result.stdout.strip()
+            if filepath:
+                self._reset_state()
+                demo_path = Path(filepath)
+                print(f"\n--- Opening: {demo_path.name} ---")
+                if self.load_demo(demo_path):
+                    pygame.display.set_caption(f"SACRILEGE RADAR - {demo_path.name}")
+                else:
+                    print("Failed to load demo")
+        except Exception as e:
+            print(f"File dialog error: {e}")
+    
     def load_demo(self, demo_path: Path) -> bool:
         from demoparser2 import DemoParser as DP2
         from src.parser.demo_parser import DemoParser
         
+        self.demo_path = demo_path
         print(f"Loading: {demo_path.name}")
         
         try:
@@ -440,7 +531,21 @@ class RadarReplayer:
                                     'attacker': attacker_name,
                                 })
             
+            # Extract round winners
+            try:
+                round_ends = dp2_temp.parse_event("round_end")
+                if isinstance(round_ends, pd.DataFrame):
+                    for _, re_row in round_ends.iterrows():
+                        winner = re_row.get('winner', 0)
+                        if winner == 3:  # CT
+                            self.round_wins['CT'] = self.round_wins.get('CT', 0) + 1
+                        elif winner == 2:  # T
+                            self.round_wins['T'] = self.round_wins.get('T', 0) + 1
+            except Exception as e:
+                print(f"⚠ Round winner parsing skipped: {e}")
+            
             print(f"✓ Loaded: {len(self.all_ticks)} ticks, {len(self.rounds)} rounds")
+            print(f"✓ Score: CT {self.round_wins['CT']} : {self.round_wins['T']} T")
             print(f"✓ Heatmap: {len(self.kill_positions)} kills, {len(self.death_positions)} deaths")
             print(f"✓ Utility: {len(self.smokes)} smokes, {len(self.mollies)} fires, {len(self.flashes)} flashes, {len(self.he_nades)} HEs")
             return True
@@ -465,26 +570,31 @@ class RadarReplayer:
         try:
             for _, r in dp2.parse_event("smokegrenade_detonate").iterrows():
                 self.smokes.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 1152})
-        except: pass
+        except Exception as e:
+            print(f"⚠ Smoke parsing skipped: {e}")
         try:
             for _, r in dp2.parse_event("inferno_startburn").iterrows():
                 self.mollies.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 448})
-        except: pass
+        except Exception as e:
+            print(f"⚠ Molotov parsing skipped: {e}")
         try:
             for _, r in dp2.parse_event("flashbang_detonate").iterrows():
                 self.flashes.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 40})
-        except: pass
+        except Exception as e:
+            print(f"⚠ Flash parsing skipped: {e}")
         try:
             for _, r in dp2.parse_event("hegrenade_detonate").iterrows():
                 self.he_nades.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 30})
-        except: pass
+        except Exception as e:
+            print(f"⚠ HE parsing skipped: {e}")
     
     def _extract_bomb_events(self, dp2):
         try:
             plants = dp2.parse_event("bomb_planted")
             if isinstance(plants, pd.DataFrame) and len(plants) > 0:
                 pass  # Would track bomb plants here
-        except: pass
+        except Exception as e:
+            print(f"⚠ Bomb event parsing skipped: {e}")
     
     def run(self):
         running = True
@@ -526,6 +636,8 @@ class RadarReplayer:
     def _handle_key(self, e):
         if e.key == pygame.K_SPACE:
             self.is_playing = not self.is_playing
+        elif e.key == pygame.K_o:
+            self._open_file_dialog()
         elif e.key == pygame.K_LEFT:
             self.tick_idx = max(0, self.tick_idx - 60)
             self._update()
@@ -549,7 +661,7 @@ class RadarReplayer:
         elif e.key == pygame.K_F12:
             self._take_screenshot()
         elif e.key == pygame.K_h:
-            self.show_help = not getattr(self, 'show_help', False)
+            self.show_help = not self.show_help
         elif e.key == pygame.K_f:
             pygame.display.toggle_fullscreen()
         elif e.key == pygame.K_j:
@@ -862,27 +974,34 @@ class RadarReplayer:
         x, y = e.pos
         
         # Player card click (left sidebar)
-        if x < 360:
-            # CT section (approx y = 85 to 320)
-            if 85 <= y <= 320:
-                card_idx = (y - 85) // 47
-                ct_players = [n for n, p in self.players.items() if p.get('team') == 'CT']
+        # Cards start at px=20, py=115, header=30px, cards=54px each
+        if x < 370:
+            ct_start_y = 115 + 34  # after CT header
+            ct_players = [sid for sid, p in self.players.items() if p.get('team') == 'CT']
+            ct_end_y = ct_start_y + len(ct_players) * 54
+            
+            if ct_start_y <= y < ct_end_y:
+                card_idx = (y - ct_start_y) // 54
                 if 0 <= card_idx < len(ct_players):
                     self.selected_player = ct_players[card_idx]
-                    print(f"Selected: {self.selected_player}")
+                    print(f"Selected: {self.players[self.selected_player]['name']}")
                     return
-            # T section (approx y = 360 to 580)
-            elif 360 <= y <= 580:
-                card_idx = (y - 360) // 47
-                t_players = [n for n, p in self.players.items() if p.get('team') == 'T']
+            
+            t_start_y = ct_end_y + 12 + 34  # gap + T header
+            t_players = [sid for sid, p in self.players.items() if p.get('team') == 'T']
+            t_end_y = t_start_y + len(t_players) * 54
+            
+            if t_start_y <= y < t_end_y:
+                card_idx = (y - t_start_y) // 54
                 if 0 <= card_idx < len(t_players):
                     self.selected_player = t_players[card_idx]
-                    print(f"Selected: {self.selected_player}")
+                    print(f"Selected: {self.players[self.selected_player]['name']}")
                     return
         
         # Timeline click
-        ty = self.height - 42
-        tx, tw = 380, self.width - 420
+        ty = self.height - 48
+        right_panel_x = self.width - 330
+        tx, tw = 400, max(100, right_panel_x - 400 - 50)
         if ty - 10 <= y <= ty + 30 and tx <= x <= tx + tw and self.all_ticks:
             self.tick_idx = int((x - tx) / tw * (len(self.all_ticks) - 1))
             self._update()
@@ -923,6 +1042,7 @@ class RadarReplayer:
                     # Count for display
                     team = k.get('attacker_team', 'T')
                     self.round_kills[team] = self.round_kills.get(team, 0) + 1
+                    self.total_kills[team] = self.total_kills.get(team, 0) + 1
                     
                     kill_id = f"{kt}_{k['victim']}"
                     
@@ -974,34 +1094,9 @@ class RadarReplayer:
                                 self.ai_last_analysis = kt
                                 self._trigger_ai_analysis(analysis)
                             
-                            # Track death position for heatmap
-                            # Get victim's position from players list
-                            victim_pos = None
-                            for p in players:
-                                if p['name'] == k['victim']:
-                                    victim_pos = (p.get('x', 0), p.get('y', 0))
-                                    break
-                            
-                            if victim_pos:
-                                self.death_positions.append({
-                                    'x': victim_pos[0],
-                                    'y': victim_pos[1],
-                                    'team': k['victim_team'],
-                                    'round': self.current_round,
-                                    'victim': k['victim'],
-                                })
-                                self.heatmap_dirty = True
-                                
-                                # Also track kill position for attacker
-                                attacker_pos = k.get('attacker_pos')
-                                if attacker_pos:
-                                    self.kill_positions.append({
-                                        'x': attacker_pos.x,
-                                        'y': attacker_pos.y,
-                                        'team': k['attacker_team'],
-                                        'round': self.current_round,
-                                        'attacker': k['attacker'],
-                                    })
+                            # Heatmap positions are pre-populated in load_demo(),
+                            # so we only mark dirty for overlay refresh
+                            self.heatmap_dirty = True
         
         # Trim old kills from feed
         self.recent_kills = [k for k in self.recent_kills if tick - k['tick'] < 400]
@@ -1087,33 +1182,177 @@ class RadarReplayer:
         self.screen.fill(Theme.BG)
         
         if not self.all_ticks:
-            self._render_loading()
+            self._render_welcome()
             return
         
         tick = self.all_ticks[self.tick_idx]
         players = self._get_players(tick)
+        
+        # Cache rankings once per frame to avoid repeated calls
+        self._cached_rankings = self.death_analyzer.get_rankings() if self.death_analyzer else []
         
         self._draw_header(tick)
         self._draw_scoreboard(players)
         self._draw_player_list(players)
         self._draw_radar(players, tick)
         self._draw_killfeed()
-        self._draw_death_panel()  # NEW: Death analysis panel
+        self._draw_death_panel()
         self._draw_round_stats(players)
         self._draw_timeline(tick)
         self._draw_legend()
+        self._draw_death_popups(tick)
+        self._draw_ai_insights()
+        self._poll_ai_responses()
         
-        if self.ai_coach:
-            self._draw_ai_insights()
-        self._draw_death_popups(tick)  # NEW: Death popups on radar
-        self._draw_ai_insights()  # AI Coach insights panel
-        self._poll_ai_responses()  # Check for AI responses
+        # Help overlay (on top of everything)
+        if self.show_help:
+            self._draw_help_overlay()
     
-    def _render_loading(self):
-        # Animated loading
-        dots = "." * ((self.frame // 20) % 4)
-        txt = self.font_xl.render(f"Loading{dots}", True, Theme.ACCENT)
-        self.screen.blit(txt, (self.width//2 - txt.get_width()//2, self.height//2))
+    def _render_welcome(self):
+        """Premium welcome screen when no demo is loaded."""
+        cx, cy = self.width // 2, self.height // 2
+        
+        # Subtle animated background gradient
+        for i in range(0, self.height, 4):
+            frac = i / self.height
+            r = int(6 + frac * 8)
+            g = int(8 + frac * 12)
+            b = int(12 + frac * 18)
+            pygame.draw.line(self.screen, (r, g, b), (0, i), (self.width, i))
+        
+        # Animated glow ring
+        pulse = abs(math.sin(self.frame * 0.02)) * 0.5 + 0.5
+        glow_r = int(100 + pulse * 40)
+        glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+        for ring in range(glow_r, 0, -2):
+            alpha = int(15 * (ring / glow_r) * pulse)
+            pygame.draw.circle(glow_surf, (0, 200, 255, alpha), (glow_r, glow_r), ring, 2)
+        self.screen.blit(glow_surf, (cx - glow_r, cy - 180 - glow_r + 50))
+        
+        # Logo
+        logo_pulse = 0.7 + abs(math.sin(self.frame * 0.025)) * 0.3
+        glow_color = (0, min(255, int(200 * logo_pulse + 55)), 255)
+        logo = self.font_xl.render("SACRILEGE", True, glow_color)
+        self.screen.blit(logo, (cx - logo.get_width() // 2, cy - 120))
+        
+        # Subtitle
+        sub = self.font_lg.render("CS2 DEMO INTELLIGENCE SYSTEM", True, Theme.GRAY)
+        self.screen.blit(sub, (cx - sub.get_width() // 2, cy - 75))
+        
+        # Version
+        ver = self.font_xs.render("v1.5.0", True, Theme.MUTED)
+        self.screen.blit(ver, (cx - ver.get_width() // 2, cy - 52))
+        
+        # Divider
+        div_w = 300
+        pygame.draw.line(self.screen, Theme.BORDER, (cx - div_w // 2, cy - 35), (cx + div_w // 2, cy - 35), 1)
+        
+        # Animated "Open Demo" prompt
+        open_pulse = abs(math.sin(self.frame * 0.04)) * 0.4 + 0.6
+        btn_w, btn_h = 260, 44
+        btn_x, btn_y = cx - btn_w // 2, cy - 10
+        
+        # Button glow
+        glow_s = pygame.Surface((btn_w + 20, btn_h + 20), pygame.SRCALPHA)
+        pygame.draw.rect(glow_s, (0, 200, 255, int(40 * open_pulse)), (0, 0, btn_w + 20, btn_h + 20), border_radius=14)
+        self.screen.blit(glow_s, (btn_x - 10, btn_y - 10))
+        
+        # Button
+        pygame.draw.rect(self.screen, Theme.CARD, (btn_x, btn_y, btn_w, btn_h), border_radius=10)
+        pygame.draw.rect(self.screen, Theme.ACCENT, (btn_x, btn_y, btn_w, btn_h), 2, border_radius=10)
+        
+        open_color = (int(min(255, 100 + 155 * open_pulse)), int(min(255, 220 + 35 * open_pulse)), 255)
+        open_txt = self.font_lg.render("Press O to Open Demo", True, open_color)
+        self.screen.blit(open_txt, (cx - open_txt.get_width() // 2, btn_y + 12))
+        
+        # Feature list
+        features = [
+            ("🎯", "Death Analysis & Blame Attribution"),
+            ("🗺️", "Interactive Heatmaps & Player Trails"),
+            ("🤖", "AI Coach Integration (Ollama)"),
+            ("📊", "Live Performance Rankings (S-F)"),
+        ]
+        
+        fy = cy + 55
+        for icon, text in features:
+            icon_txt = self.font_md.render(icon, True, Theme.WHITE)
+            feat_txt = self.font_sm.render(text, True, Theme.GRAY)
+            self.screen.blit(icon_txt, (cx - 150, fy))
+            self.screen.blit(feat_txt, (cx - 120, fy + 2))
+            fy += 26
+        
+        # Bottom hint
+        hint = self.font_xs.render("Drag & drop .dem file or pass as CLI argument", True, Theme.DIM)
+        self.screen.blit(hint, (cx - hint.get_width() // 2, self.height - 40))
+    
+    def _draw_help_overlay(self):
+        """Draw semi-transparent help overlay with all keyboard shortcuts."""
+        # Semi-transparent backdrop
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Panel
+        pw, ph = 500, 480
+        px = (self.width - pw) // 2
+        py = (self.height - ph) // 2
+        
+        pygame.draw.rect(self.screen, Theme.PANEL, (px, py, pw, ph), border_radius=12)
+        pygame.draw.rect(self.screen, Theme.ACCENT, (px, py, pw, ph), 2, border_radius=12)
+        
+        # Title
+        title = self.font_xl.render("KEYBOARD SHORTCUTS", True, Theme.ACCENT)
+        self.screen.blit(title, (px + pw // 2 - title.get_width() // 2, py + 15))
+        pygame.draw.line(self.screen, Theme.BORDER, (px + 20, py + 55), (px + pw - 20, py + 55), 1)
+        
+        # Shortcut groups
+        groups = [
+            ("PLAYBACK", [
+                ("Space", "Play / Pause"),
+                ("← →", "Seek backward / forward"),
+                ("↑ ↓", "Speed up / slow down"),
+                ("E / R", "Previous / Next round"),
+                ("Home / End", "Jump to start / end"),
+            ]),
+            ("FILES & EXPORT", [
+                ("O", "Open demo file"),
+                ("J", "Export analysis as JSON"),
+                ("F12", "Take screenshot"),
+                ("Shift+M", "Export heatmap as PNG"),
+            ]),
+            ("OVERLAYS", [
+                ("M", "Toggle heatmap overlay"),
+                ("T", "Toggle player trails"),
+                ("N", "Filter heatmap by round"),
+                ("1-5", "Heatmap mode (All/Kill/Death/CT/T)"),
+            ]),
+            ("OTHER", [
+                ("C", "AI Coach analysis"),
+                ("B", "Bookmark current position"),
+                ("F", "Toggle fullscreen"),
+                ("H", "Toggle this help panel"),
+            ]),
+        ]
+        
+        cy = py + 65
+        for group_name, shortcuts in groups:
+            # Group header
+            self.screen.blit(self.font_md.render(group_name, True, Theme.ACCENT2), (px + 25, cy))
+            cy += 22
+            for key, desc in shortcuts:
+                # Key badge
+                key_txt = self.font_sm.render(key, True, Theme.WHITE)
+                key_w = max(60, key_txt.get_width() + 16)
+                pygame.draw.rect(self.screen, Theme.CARD_ACTIVE, (px + 30, cy, key_w, 20), border_radius=4)
+                self.screen.blit(key_txt, (px + 30 + (key_w - key_txt.get_width()) // 2, cy + 3))
+                # Description
+                self.screen.blit(self.font_sm.render(desc, True, Theme.GRAY), (px + 30 + key_w + 12, cy + 3))
+                cy += 24
+            cy += 8
+        
+        # Close hint
+        close_txt = self.font_sm.render("Press H to close", True, Theme.MUTED)
+        self.screen.blit(close_txt, (px + pw // 2 - close_txt.get_width() // 2, py + ph - 30))
     
     def _draw_header(self, tick):
         # Header bar
@@ -1125,9 +1364,14 @@ class RadarReplayer:
         logo = self.font_xl.render("SACRILEGE", True, glow)
         self.screen.blit(logo, (15, 10))
         
-        # Subtitle
-        sub = self.font_xs.render("CS2 DEMO VIEWER", True, Theme.GRAY)
-        self.screen.blit(sub, (18, 38))
+        # Demo filename
+        if self.demo_path:
+            demo_name = self.demo_path.stem.replace('-', ' ').upper()
+            demo_txt = self.font_sm.render(demo_name, True, Theme.GRAY)
+            self.screen.blit(demo_txt, (18, 38))
+        else:
+            sub = self.font_xs.render("CS2 DEMO VIEWER", True, Theme.GRAY)
+            self.screen.blit(sub, (18, 38))
         
         # Accent line with gradient effect
         for i in range(3):
@@ -1152,11 +1396,17 @@ class RadarReplayer:
         
         ct_alive = sum(1 for p in players if p['team'] == 'CT' and p['alive'])
         t_alive = sum(1 for p in players if p['team'] == 'T' and p['alive'])
+        ct_rounds = self.round_wins.get('CT', 0)
+        t_rounds = self.round_wins.get('T', 0)
         
         # CT box
         pygame.draw.rect(self.screen, Theme.CT_DARK, (cx - 185, sy, 160, 48), border_radius=6)
         pygame.draw.rect(self.screen, Theme.CT, (cx - 185, sy, 4, 48), border_top_left_radius=6, border_bottom_left_radius=6)
         self.screen.blit(self.font_lg.render("CT", True, Theme.CT_LIGHT), (cx - 175, sy + 8))
+        
+        # CT round wins
+        ct_score = self.font_xl.render(str(ct_rounds), True, Theme.CT_LIGHT)
+        self.screen.blit(ct_score, (cx - 45 - ct_score.get_width(), sy + 8))
         
         # CT alive indicator dots
         for i in range(5):
@@ -1164,16 +1414,21 @@ class RadarReplayer:
             pygame.draw.circle(self.screen, color, (cx - 170 + i * 18, sy + 38), 5)
         
         # Center - Map and Round
-        pygame.draw.rect(self.screen, Theme.CARD, (cx - 55, sy, 110, 48), border_radius=6)
+        pygame.draw.rect(self.screen, Theme.CARD, (cx - 35, sy, 70, 48), border_radius=6)
         map_txt = self.map_config.display_name if self.map_config else "UNKNOWN"
-        self.screen.blit(self.font_sm.render(map_txt, True, Theme.GRAY), (cx - 30, sy + 6))
+        map_surf = self.font_xs.render(map_txt, True, Theme.GRAY)
+        self.screen.blit(map_surf, (cx - map_surf.get_width() // 2, sy + 4))
         rd = self.font_lg.render(f"R{self.current_round}", True, Theme.WHITE)
-        self.screen.blit(rd, (cx - rd.get_width()//2, sy + 24))
+        self.screen.blit(rd, (cx - rd.get_width()//2, sy + 22))
         
         # T box
         pygame.draw.rect(self.screen, Theme.T_DARK, (cx + 25, sy, 160, 48), border_radius=6)
         pygame.draw.rect(self.screen, Theme.T, (cx + 181, sy, 4, 48), border_top_right_radius=6, border_bottom_right_radius=6)
         self.screen.blit(self.font_lg.render("T", True, Theme.T_LIGHT), (cx + 155, sy + 8))
+        
+        # T round wins
+        t_score = self.font_xl.render(str(t_rounds), True, Theme.T_LIGHT)
+        self.screen.blit(t_score, (cx + 45, sy + 8))
         
         # T alive indicator dots
         for i in range(5):
@@ -1210,7 +1465,7 @@ class RadarReplayer:
     def _draw_player_card(self, p, x, y, w):
         h = 50
         alive = p['alive']
-        is_selected = p['name'] == self.selected_player
+        is_selected = p['id'] == self.selected_player
         
         # Background with selection/hover effect
         if is_selected:
@@ -1251,17 +1506,15 @@ class RadarReplayer:
         name_color = Theme.WHITE if alive else Theme.MUTED
         self.screen.blit(self.font_md.render(p['name'], True, name_color), (x + 48, y + 6))
         
-        # Player grade indicator (from death analyzer)
-        if self.death_analyzer:
-            rankings = self.death_analyzer.get_rankings()
-            for r in rankings:
-                if r.name == p['name']:
-                    grade = r.rank_grade
-                    grade_color = get_grade_color(grade)
-                    # Draw grade badge
-                    pygame.draw.rect(self.screen, grade_color, (x + w - 28, y + 4, 22, 18), border_radius=4)
-                    self.screen.blit(self.font_sm.render(grade, True, Theme.BG), (x + w - 22, y + 5))
-                    break
+        # Player grade indicator (from cached rankings)
+        for r in self._cached_rankings:
+            if r.name == p['name']:
+                grade = r.rank_grade
+                grade_color = get_grade_color(grade)
+                # Draw grade badge
+                pygame.draw.rect(self.screen, grade_color, (x + w - 28, y + 4, 22, 18), border_radius=4)
+                self.screen.blit(self.font_sm.render(grade, True, Theme.BG), (x + w - 22, y + 5))
+                break
         
         if alive:
             # HP bar with gradient feel
@@ -1437,6 +1690,21 @@ class RadarReplayer:
         pygame.draw.circle(self.screen, color, (x, y), 10)
         pygame.draw.circle(self.screen, light, (x, y), 10, 2)
         
+        # View direction indicator (triangle)
+        yaw = p.get('yaw', 0)
+        # CS2 yaw: 0=east, 90=north, convert to screen coords (Y flipped)
+        yaw_rad = math.radians(yaw)
+        arrow_len = 18
+        tip_x = x + int(math.cos(yaw_rad) * arrow_len)
+        tip_y = y - int(math.sin(yaw_rad) * arrow_len)  # Y flipped
+        # Triangle wing points
+        wing_angle = 2.5  # radians offset
+        w1_x = x + int(math.cos(yaw_rad + wing_angle) * 8)
+        w1_y = y - int(math.sin(yaw_rad + wing_angle) * 8)
+        w2_x = x + int(math.cos(yaw_rad - wing_angle) * 8)
+        w2_y = y - int(math.sin(yaw_rad - wing_angle) * 8)
+        pygame.draw.polygon(self.screen, light, [(tip_x, tip_y), (w1_x, w1_y), (w2_x, w2_y)])
+        
         # Bomb carrier - pulsing
         if p.get('bomb'):
             pulse = abs(math.sin(self.frame * 0.15)) * 4
@@ -1557,9 +1825,10 @@ class RadarReplayer:
     
     def _draw_timeline(self, tick):
         ty = self.height - 48
-        # Timeline ends before the right panel stack (1275)
-        # 1275 - 380 = 895. Use 880 for safety.
-        tx, tw = 380, 880
+        # Timeline spans from radar left edge to just before right panels
+        tx = 400
+        right_panel_x = self.width - 330
+        tw = max(100, right_panel_x - tx - 50)
         
         # Background
         pygame.draw.rect(self.screen, Theme.PANEL, (tx - 18, ty - 10, tw + 36, 36), border_radius=8)
@@ -1637,7 +1906,7 @@ class RadarReplayer:
                 
                 # Draw larger popup box with full analytics
                 box_w = 200
-                box_h = 120
+                box_h = 155
                 box_x = min(x + 15, rx + self.radar_size - box_w - 10)
                 box_y = max(y - box_h // 2, ry + 10)
                 
@@ -1675,12 +1944,6 @@ class RadarReplayer:
                 self.screen.blit(self.font_xs.render(trade, True, trade_color), (box_x + 12, cy))
                 
                 blame = analysis.blame_score()
-                # AI Coach Hint
-                cy += 20
-                if self.ai_coach and self.ai_coach.available:
-                    pygame.draw.rect(self.screen, (100, 50, 255), (box_x + 10, cy + box_y - box_y, box_w - 20, 18), border_radius=4)
-                    self.screen.blit(self.font_xs.render("Press C for AI Coach", True, Theme.WHITE), (box_x + 45, cy + 2))
-
                 blame_color = (100, 200, 100) if blame < 40 else (255, 180, 50) if blame < 60 else (255, 80, 80)
                 self.screen.blit(self.font_xs.render(f"Blame: {blame:.0f}%", True, blame_color), (box_x + 110, cy))
                 
@@ -1689,6 +1952,14 @@ class RadarReplayer:
                 if len(analysis.mistakes) > 1:
                     other = ", ".join([DeathAnalyzer.get_mistake_label(m) for m in analysis.mistakes[1:3]])
                     self.screen.blit(self.font_xs.render(f"+{other}", True, Theme.MUTED), (box_x + 12, cy))
+                
+                # AI Coach Hint
+                cy += 18
+                if self.ai_coach and self.ai_coach.available:
+                    pill_w = box_w - 24
+                    pygame.draw.rect(self.screen, (100, 50, 255), (box_x + 12, cy, pill_w, 18), border_radius=4)
+                    hint = self.font_xs.render("Press C for AI Coach", True, Theme.WHITE)
+                    self.screen.blit(hint, (box_x + 12 + (pill_w - hint.get_width()) // 2, cy + 2))
                 
                 # Line to death position
                 pygame.draw.line(self.screen, (*color, min(150, alpha)), (x, y), (box_x, box_y + box_h // 2), 2)
@@ -1712,7 +1983,7 @@ class RadarReplayer:
         self.screen.blit(self.font_lg.render("LIVE RANKINGS", True, Theme.ACCENT), (px + 5, py + 8))
         pygame.draw.line(self.screen, Theme.BORDER, (px, py + 34), (px + pw, py + 34), 1)
         
-        rankings = self.death_analyzer.get_rankings()
+        rankings = self._cached_rankings
         cy = py + 42
         
         # Show top 8 players
@@ -1766,12 +2037,15 @@ class RadarReplayer:
             
         elif self.selected_player and self.death_analyzer:
             # Case 2: No popup, player selected - DEEP ANALYSIS
-            stats = self.death_analyzer.player_stats.get(self.selected_player)
+            # selected_player is a steam_id, look up the player name for stats
+            player_info = self.players.get(self.selected_player, {})
+            player_name = player_info.get('name', self.selected_player)
+            stats = self.death_analyzer.player_stats.get(player_name)
             if not stats:
-                print(f"⚠ No stats found for {self.selected_player}")
+                print(f"⚠ No stats found for {player_name}")
                 return
                 
-            print(f"⚡ Asking Qwen for deep analysis on {self.selected_player}...")
+            print(f"⚡ Asking Qwen for deep analysis on {player_name}...")
             prompt = self.death_analyzer.get_player_analysis_prompt(stats)
             
         else:
@@ -1886,7 +2160,7 @@ class RadarReplayer:
         ly = self.height - 22
         lx = 15
         
-        # Utility legend - LARGER
+        # Utility legend
         items = [
             (Theme.SMOKE, "Smoke"),
             (Theme.FIRE, "Fire"),
@@ -1895,14 +2169,15 @@ class RadarReplayer:
         ]
         
         for color, label in items:
-            pygame.draw.circle(self.screen, color, (lx + 10, ly), 10)
-            txt = self.font_lg.render(label, True, Theme.WHITE)
-            self.screen.blit(txt, (lx + 25, ly - 10))
-            lx += txt.get_width() + 50
+            pygame.draw.circle(self.screen, color, (lx + 6, ly), 6)
+            txt = self.font_md.render(label, True, Theme.WHITE)
+            self.screen.blit(txt, (lx + 16, ly - 8))
+            lx += txt.get_width() + 35
         
-        # Controls hint - LARGER
-        hint = "SPACE: Play  ←→: Seek  ↑↓: Speed  E/R: Round  M: Heatmap  T: Trails  1-5: Mode  N: Filter"
-        self.screen.blit(self.font_md.render(hint, True, Theme.GRAY), (280, ly - 8))
+        # Controls hint - compact on the right
+        hint = "SPC:Play  ←→:Seek  ↑↓:Spd  E/R:Rnd  M:Map  T:Trail  N:Filt  C:Coach"
+        hint_txt = self.font_xs.render(hint, True, Theme.GRAY)
+        self.screen.blit(hint_txt, (self.width - hint_txt.get_width() - 15, ly + 2))
     
     def _draw_ai_insights(self):
         """Draw AI coaching tips window."""
@@ -1957,7 +2232,8 @@ class RadarReplayer:
             
             # Pulsing waiting text
             pulse = abs(math.sin(self.frame * 0.05)) * 100
-            wait_color = (130 + pulse, 130 + pulse, 130 + pulse)
+            cval = min(255, int(130 + pulse))
+            wait_color = (cval, cval, cval)
             wait_txt = self.font_md.render("Waiting for analysis...", True, wait_color)
             self.screen.blit(wait_txt, (cx - wait_txt.get_width()//2, cy - 20))
             
@@ -1996,12 +2272,7 @@ def main():
     
     if args.demo:
         replayer.load_demo(Path(args.demo))
-    else:
-        demo_dir = Path(__file__).parent.parent / 'demo files'
-        if demo_dir.exists():
-            demos = list(demo_dir.glob('*.dem'))
-            if demos:
-                replayer.load_demo(demos[0])
+    # If no argument, show welcome screen (don't auto-load)
     
     replayer.run()
 
