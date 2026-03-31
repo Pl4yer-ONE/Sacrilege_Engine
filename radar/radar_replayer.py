@@ -171,19 +171,19 @@ class RadarReplayer:
         self.fps_timer = 0
         self.anim_time = 0  # Animation timer
         
-        # Fonts with fallbacks - LARGER SIZES
+        # Fonts - HIGH VISIBILITY sizes
         try:
-            self.font_xl = pygame.font.SysFont('SF Pro Display', 36, bold=True)
+            self.font_xl = pygame.font.SysFont('SF Pro Display', 38, bold=True)
             self.font_lg = pygame.font.SysFont('SF Pro Display', 22, bold=True)
-            self.font_md = pygame.font.SysFont('SF Pro Text', 16)
-            self.font_sm = pygame.font.SysFont('SF Pro Text', 14)
-            self.font_xs = pygame.font.SysFont('SF Pro Text', 11)
+            self.font_md = pygame.font.SysFont('SF Pro Text', 17)
+            self.font_sm = pygame.font.SysFont('SF Pro Text', 15)
+            self.font_xs = pygame.font.SysFont('SF Pro Text', 13)
         except Exception:
-            self.font_xl = pygame.font.SysFont('Arial', 36, bold=True)
+            self.font_xl = pygame.font.SysFont('Arial', 38, bold=True)
             self.font_lg = pygame.font.SysFont('Arial', 22, bold=True)
-            self.font_md = pygame.font.SysFont('Arial', 16)
-            self.font_sm = pygame.font.SysFont('Arial', 14)
-            self.font_xs = pygame.font.SysFont('Arial', 11)
+            self.font_md = pygame.font.SysFont('Arial', 17)
+            self.font_sm = pygame.font.SysFont('Arial', 15)
+            self.font_xs = pygame.font.SysFont('Arial', 13)
         
         # UI State
         self.show_help = False
@@ -192,7 +192,6 @@ class RadarReplayer:
         
         # State
         self.demo_data = None
-        self.demo_path = None  # Track loaded demo path
         self.map_config = None
         self.map_image = None
         self.map_scaled = None
@@ -209,7 +208,6 @@ class RadarReplayer:
         self.rounds: List[tuple] = []
         self.kills_by_tick: Dict[int, list] = {}
         self.current_round = 1
-        self.round_wins = {'CT': 0, 'T': 0}  # Track round wins
         
         # Utility
         self.smokes = []
@@ -241,7 +239,7 @@ class RadarReplayer:
         # New Features v1.4
         self.show_heatmap = False  # M key toggle
         self.death_positions = []  # [(x, y, team, round)]
-        self.kill_positions = []  # [(x, y, team, round)]
+        self.kill_positions = []  # [(x, y, team, round)] - NEW
         self.bookmarks = []  # [(tick, reason, data)]
         self.selected_player = None  # Clicked player card
         self.player_detail_mode = False
@@ -262,16 +260,51 @@ class RadarReplayer:
         self.ai_insights = []  # List of (type, text, expire_time)
         self.ai_last_analysis = 0  # Tick of last analysis
         
-        # Per-frame cache
-        self._cached_rankings = []
+        # Interactive Chat System
+        self.chat_active = False  # Whether chat input is focused
+        self.chat_input = ""  # Current text being typed
+        self.chat_messages = []  # List of {'role': 'user'|'coach', 'text': str, 'time': int}
+        self.chat_scroll = 0  # Scroll offset for chat history
+        self.chat_waiting = False  # Waiting for AI response
+        self.chat_panel_visible = True  # Show/hide the chat panel
+        self.chat_cursor_blink = 0  # Cursor blink timer
         
+        # Demo file path tracking
+        self.demo_path = None
+        self.demo_filename = ""
+        
+        # File browser state
+        self.file_browser_active = True  # Start with browser active (welcome screen)
+        self.available_demos = []  # List of Path objects
+        self.file_browser_scroll = 0
+        self.file_browser_hover = -1  # Index of hovered item
+        self._scan_demos()
+    
+    def _scan_demos(self):
+        """Scan for available demo files."""
+        demo_dir = Path(__file__).parent.parent / 'demo files'
+        self.available_demos = []
+        if demo_dir.exists():
+            self.available_demos = sorted(demo_dir.glob('*.dem'), key=lambda p: p.name)
+        print(f"Found {len(self.available_demos)} demo files")
+    
+    def open_file_dialog(self):
+        """Toggle the in-app file browser."""
+        self._scan_demos()  # Refresh list
+        self.file_browser_active = True
+        self.file_browser_scroll = 0
+    
+    def _select_demo(self, index: int):
+        """Load a demo from the available demos list."""
+        if 0 <= index < len(self.available_demos):
+            path = self.available_demos[index]
+            self._reset_state()
+            self.file_browser_active = False
+            self.load_demo(path)
+    
     def _reset_state(self):
-        """Reset all playback state for loading a new demo."""
+        """Reset all state for loading a new demo."""
         self.demo_data = None
-        self.map_config = None
-        self.map_image = None
-        self.map_scaled = None
-        self.is_playing = False
         self.tick_df = None
         self.all_ticks = []
         self.tick_idx = 0
@@ -279,7 +312,6 @@ class RadarReplayer:
         self.rounds = []
         self.kills_by_tick = {}
         self.current_round = 1
-        self.round_wins = {'CT': 0, 'T': 0}
         self.smokes = []
         self.mollies = []
         self.flashes = []
@@ -288,73 +320,32 @@ class RadarReplayer:
         self.total_kills = {'CT': 0, 'T': 0}
         self.recent_kills = []
         self.kill_animations = []
+        self.damage_indicators = []
+        self.bomb_planted = False
+        self.bomb_position = None
         self.death_analyzer = None
         self.death_popups = []
         self.analyzed_kills = set()
         self.death_positions = []
         self.kill_positions = []
-        self.bookmarks = []
-        self.selected_player = None
-        self.heatmap_dirty = True
         self.player_trails = {}
+        self.heatmap_dirty = True
         self.ai_insights = []
-        self._cached_rankings = []
-    
-    def _open_file_dialog(self):
-        """Open a native file dialog using a subprocess to avoid Tkinter/Pygame macOS conflicts."""
-        import subprocess
-        import sys
+        self.chat_messages = []
+        self.chat_input = ""
+        self.chat_scroll = 0
+        self.is_playing = False
         
-        # Default to demo files directory
-        initial_dir = str(Path(__file__).parent.parent / 'demo files')
-        if not Path(initial_dir).exists():
-            initial_dir = str(Path.home())
-            
-        script = f'''
-import tkinter as tk
-from tkinter import filedialog
-import sys
-
-root = tk.Tk()
-root.withdraw()
-root.attributes('-topmost', True)
-
-filepath = filedialog.askopenfilename(
-    title="Open CS2 Demo File",
-    initialdir={repr(initial_dir)},
-    filetypes=[
-        ("CS2 Demo Files", "*.dem"),
-        ("All Files", "*.*"),
-    ],
-)
-if filepath:
-    print(filepath)
-'''
-        try:
-            # Run the tkinter dialog in an isolated process
-            result = subprocess.run(
-                [sys.executable, '-c', script],
-                capture_output=True,
-                text=True
-            )
-            
-            filepath = result.stdout.strip()
-            if filepath:
-                self._reset_state()
-                demo_path = Path(filepath)
-                print(f"\n--- Opening: {demo_path.name} ---")
-                if self.load_demo(demo_path):
-                    pygame.display.set_caption(f"SACRILEGE RADAR - {demo_path.name}")
-                else:
-                    print("Failed to load demo")
-        except Exception as e:
-            print(f"File dialog error: {e}")
+        # Reset AI coach conversation
+        if self.ai_coach:
+            self.ai_coach.reset_conversation()
     
     def load_demo(self, demo_path: Path) -> bool:
         from demoparser2 import DemoParser as DP2
         from src.parser.demo_parser import DemoParser
         
         self.demo_path = demo_path
+        self.demo_filename = demo_path.name
         print(f"Loading: {demo_path.name}")
         
         try:
@@ -531,21 +522,7 @@ if filepath:
                                     'attacker': attacker_name,
                                 })
             
-            # Extract round winners
-            try:
-                round_ends = dp2_temp.parse_event("round_end")
-                if isinstance(round_ends, pd.DataFrame):
-                    for _, re_row in round_ends.iterrows():
-                        winner = re_row.get('winner', 0)
-                        if winner == 3:  # CT
-                            self.round_wins['CT'] = self.round_wins.get('CT', 0) + 1
-                        elif winner == 2:  # T
-                            self.round_wins['T'] = self.round_wins.get('T', 0) + 1
-            except Exception as e:
-                print(f"⚠ Round winner parsing skipped: {e}")
-            
             print(f"✓ Loaded: {len(self.all_ticks)} ticks, {len(self.rounds)} rounds")
-            print(f"✓ Score: CT {self.round_wins['CT']} : {self.round_wins['T']} T")
             print(f"✓ Heatmap: {len(self.kill_positions)} kills, {len(self.death_positions)} deaths")
             print(f"✓ Utility: {len(self.smokes)} smokes, {len(self.mollies)} fires, {len(self.flashes)} flashes, {len(self.he_nades)} HEs")
             return True
@@ -570,31 +547,26 @@ if filepath:
         try:
             for _, r in dp2.parse_event("smokegrenade_detonate").iterrows():
                 self.smokes.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 1152})
-        except Exception as e:
-            print(f"⚠ Smoke parsing skipped: {e}")
+        except: pass
         try:
             for _, r in dp2.parse_event("inferno_startburn").iterrows():
                 self.mollies.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 448})
-        except Exception as e:
-            print(f"⚠ Molotov parsing skipped: {e}")
+        except: pass
         try:
             for _, r in dp2.parse_event("flashbang_detonate").iterrows():
                 self.flashes.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 40})
-        except Exception as e:
-            print(f"⚠ Flash parsing skipped: {e}")
+        except: pass
         try:
             for _, r in dp2.parse_event("hegrenade_detonate").iterrows():
                 self.he_nades.append({'x': r['x'], 'y': r['y'], 'start': r['tick'], 'end': r['tick'] + 30})
-        except Exception as e:
-            print(f"⚠ HE parsing skipped: {e}")
+        except: pass
     
     def _extract_bomb_events(self, dp2):
         try:
             plants = dp2.parse_event("bomb_planted")
             if isinstance(plants, pd.DataFrame) and len(plants) > 0:
                 pass  # Would track bomb plants here
-        except Exception as e:
-            print(f"⚠ Bomb event parsing skipped: {e}")
+        except: pass
     
     def run(self):
         running = True
@@ -602,6 +574,7 @@ if filepath:
         
         while running:
             self.frame += 1
+            self.chat_cursor_blink += 1
             
             # FPS calculation
             now = pygame.time.get_ticks()
@@ -613,9 +586,21 @@ if filepath:
                 if e.type == pygame.QUIT:
                     running = False
                 elif e.type == pygame.KEYDOWN:
-                    self._handle_key(e)
+                    if self.chat_active:
+                        self._handle_chat_key(e)
+                    else:
+                        self._handle_key(e)
+                elif e.type == pygame.TEXTINPUT:
+                    if self.chat_active:
+                        self.chat_input += e.text
                 elif e.type == pygame.MOUSEBUTTONDOWN:
                     self._handle_click(e)
+                elif e.type == pygame.MOUSEWHEEL:
+                    if self.file_browser_active and not self.all_ticks:
+                        max_scroll = max(0, len(self.available_demos) * 44 - (self.height - 240))
+                        self.file_browser_scroll = max(0, min(max_scroll, self.file_browser_scroll - e.y * 30))
+                    elif self.chat_active:
+                        self.chat_scroll = max(0, self.chat_scroll - e.y * 3)
                 elif e.type == pygame.VIDEORESIZE:
                     self.width, self.height = e.w, e.h
                     self.screen = pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
@@ -636,8 +621,6 @@ if filepath:
     def _handle_key(self, e):
         if e.key == pygame.K_SPACE:
             self.is_playing = not self.is_playing
-        elif e.key == pygame.K_o:
-            self._open_file_dialog()
         elif e.key == pygame.K_LEFT:
             self.tick_idx = max(0, self.tick_idx - 60)
             self._update()
@@ -661,7 +644,7 @@ if filepath:
         elif e.key == pygame.K_F12:
             self._take_screenshot()
         elif e.key == pygame.K_h:
-            self.show_help = not self.show_help
+            self.show_help = not getattr(self, 'show_help', False)
         elif e.key == pygame.K_f:
             pygame.display.toggle_fullscreen()
         elif e.key == pygame.K_j:
@@ -688,6 +671,12 @@ if filepath:
                 self.heatmap_round_filter = None
                 print("Heatmap filter: All rounds")
             self.heatmap_dirty = True
+        elif e.key == pygame.K_o:
+            # Open file dialog
+            self.open_file_dialog()
+        elif e.key == pygame.K_RETURN or e.key == pygame.K_KP_ENTER:
+            # Enter chat mode
+            self.chat_active = True
         elif e.key == pygame.K_1:
             self.heatmap_mode = 'all'
             self.heatmap_dirty = True
@@ -708,6 +697,34 @@ if filepath:
             self.heatmap_mode = 't'
             self.heatmap_dirty = True
             print("Heatmap mode: T events")
+    
+    def _handle_chat_key(self, e):
+        """Handle keyboard events when chat is active."""
+        if e.key == pygame.K_ESCAPE:
+            self.chat_active = False
+        elif e.key == pygame.K_RETURN or e.key == pygame.K_KP_ENTER:
+            if self.chat_input.strip():
+                self._send_chat_message(self.chat_input.strip())
+                self.chat_input = ""
+        elif e.key == pygame.K_BACKSPACE:
+            if e.mod & pygame.KMOD_META or e.mod & pygame.KMOD_CTRL:
+                self.chat_input = ""
+            else:
+                self.chat_input = self.chat_input[:-1]
+        elif e.key == pygame.K_v and (e.mod & pygame.KMOD_META or e.mod & pygame.KMOD_CTRL):
+            # Paste from clipboard
+            try:
+                import subprocess
+                result = subprocess.run(['pbpaste'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    self.chat_input += result.stdout.strip()
+            except:
+                pass
+        elif e.key == pygame.K_UP:
+            self.chat_scroll = max(0, self.chat_scroll + 3)
+        elif e.key == pygame.K_DOWN:
+            self.chat_scroll = max(0, self.chat_scroll - 3)
+        # Note: actual text input comes via TEXTINPUT events (handled in event loop)
     
     def _take_screenshot(self):
         """Save screenshot to Downloads folder."""
@@ -973,35 +990,59 @@ if filepath:
     def _handle_click(self, e):
         x, y = e.pos
         
-        # Player card click (left sidebar)
-        # Cards start at px=20, py=115, header=30px, cards=54px each
-        if x < 370:
-            ct_start_y = 115 + 34  # after CT header
-            ct_players = [sid for sid, p in self.players.items() if p.get('team') == 'CT']
-            ct_end_y = ct_start_y + len(ct_players) * 54
+        # Welcome screen / file browser - handle demo selection
+        if not self.all_ticks or self.file_browser_active:
+            cx = self.width // 2
+            list_x = cx - 280
+            list_w = 560
+            list_y_start = 180  # header_y(140) + 40
+            item_h = 44
             
-            if ct_start_y <= y < ct_end_y:
-                card_idx = (y - ct_start_y) // 54
+            # Check if click is on a demo file item
+            for i, demo_path in enumerate(self.available_demos):
+                item_y = list_y_start + i * item_h - self.file_browser_scroll
+                if list_x <= x <= list_x + list_w and item_y <= y <= item_y + item_h - 4:
+                    if item_y >= list_y_start - 10 and item_y + item_h <= self.height - 40:
+                        self._select_demo(i)
+                        return
+            return
+        
+        # Chat input area click - activate chat
+        chat_px = self.width - 345
+        chat_py = 685
+        chat_pw = 330
+        chat_ph = self.height - chat_py - 35
+        if chat_px <= x <= chat_px + chat_pw and chat_py <= y <= chat_py + chat_ph:
+            # Clicking anywhere in chat panel activates it
+            self.chat_active = True
+            return
+        else:
+            if self.chat_active:
+                self.chat_active = False
+                pass  # Just deactivate the flag
+        
+        # Player card click (left sidebar)
+        if x < 360:
+            # CT section (approx y = 85 to 320)
+            if 85 <= y <= 320:
+                card_idx = (y - 85) // 47
+                ct_players = [n for n, p in self.players.items() if p.get('team') == 'CT']
                 if 0 <= card_idx < len(ct_players):
                     self.selected_player = ct_players[card_idx]
-                    print(f"Selected: {self.players[self.selected_player]['name']}")
+                    print(f"Selected: {self.selected_player}")
                     return
-            
-            t_start_y = ct_end_y + 12 + 34  # gap + T header
-            t_players = [sid for sid, p in self.players.items() if p.get('team') == 'T']
-            t_end_y = t_start_y + len(t_players) * 54
-            
-            if t_start_y <= y < t_end_y:
-                card_idx = (y - t_start_y) // 54
+            # T section (approx y = 360 to 580)
+            elif 360 <= y <= 580:
+                card_idx = (y - 360) // 47
+                t_players = [n for n, p in self.players.items() if p.get('team') == 'T']
                 if 0 <= card_idx < len(t_players):
                     self.selected_player = t_players[card_idx]
-                    print(f"Selected: {self.players[self.selected_player]['name']}")
+                    print(f"Selected: {self.selected_player}")
                     return
         
         # Timeline click
-        ty = self.height - 48
-        right_panel_x = self.width - 330
-        tx, tw = 400, max(100, right_panel_x - 400 - 50)
+        ty = self.height - 42
+        tx, tw = 380, self.width - 420
         if ty - 10 <= y <= ty + 30 and tx <= x <= tx + tw and self.all_ticks:
             self.tick_idx = int((x - tx) / tw * (len(self.all_ticks) - 1))
             self._update()
@@ -1042,7 +1083,6 @@ if filepath:
                     # Count for display
                     team = k.get('attacker_team', 'T')
                     self.round_kills[team] = self.round_kills.get(team, 0) + 1
-                    self.total_kills[team] = self.total_kills.get(team, 0) + 1
                     
                     kill_id = f"{kt}_{k['victim']}"
                     
@@ -1094,9 +1134,34 @@ if filepath:
                                 self.ai_last_analysis = kt
                                 self._trigger_ai_analysis(analysis)
                             
-                            # Heatmap positions are pre-populated in load_demo(),
-                            # so we only mark dirty for overlay refresh
-                            self.heatmap_dirty = True
+                            # Track death position for heatmap
+                            # Get victim's position from players list
+                            victim_pos = None
+                            for p in players:
+                                if p['name'] == k['victim']:
+                                    victim_pos = (p.get('x', 0), p.get('y', 0))
+                                    break
+                            
+                            if victim_pos:
+                                self.death_positions.append({
+                                    'x': victim_pos[0],
+                                    'y': victim_pos[1],
+                                    'team': k['victim_team'],
+                                    'round': self.current_round,
+                                    'victim': k['victim'],
+                                })
+                                self.heatmap_dirty = True
+                                
+                                # Also track kill position for attacker
+                                attacker_pos = k.get('attacker_pos')
+                                if attacker_pos:
+                                    self.kill_positions.append({
+                                        'x': attacker_pos.x,
+                                        'y': attacker_pos.y,
+                                        'team': k['attacker_team'],
+                                        'round': self.current_round,
+                                        'attacker': k['attacker'],
+                                    })
         
         # Trim old kills from feed
         self.recent_kills = [k for k in self.recent_kills if tick - k['tick'] < 400]
@@ -1188,9 +1253,6 @@ if filepath:
         tick = self.all_ticks[self.tick_idx]
         players = self._get_players(tick)
         
-        # Cache rankings once per frame to avoid repeated calls
-        self._cached_rankings = self.death_analyzer.get_rankings() if self.death_analyzer else []
-        
         self._draw_header(tick)
         self._draw_scoreboard(players)
         self._draw_player_list(players)
@@ -1200,159 +1262,135 @@ if filepath:
         self._draw_round_stats(players)
         self._draw_timeline(tick)
         self._draw_legend()
-        self._draw_death_popups(tick)
-        self._draw_ai_insights()
-        self._poll_ai_responses()
         
-        # Help overlay (on top of everything)
-        if self.show_help:
-            self._draw_help_overlay()
+        self._draw_death_popups(tick)
+        self._draw_chat_panel()  # Interactive chat panel
+        self._poll_ai_responses()
     
     def _render_welcome(self):
-        """Premium welcome screen when no demo is loaded."""
+        """Render the welcome screen with demo file browser."""
         cx, cy = self.width // 2, self.height // 2
         
-        # Subtle animated background gradient
-        for i in range(0, self.height, 4):
-            frac = i / self.height
-            r = int(6 + frac * 8)
-            g = int(8 + frac * 12)
-            b = int(12 + frac * 18)
+        # Animated background gradient
+        for i in range(self.height):
+            progress = i / self.height
+            r = int(6 + progress * 8)
+            g = int(8 + progress * 12)
+            b = int(12 + progress * 20)
             pygame.draw.line(self.screen, (r, g, b), (0, i), (self.width, i))
         
-        # Animated glow ring
-        pulse = abs(math.sin(self.frame * 0.02)) * 0.5 + 0.5
-        glow_r = int(100 + pulse * 40)
-        glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
-        for ring in range(glow_r, 0, -2):
-            alpha = int(15 * (ring / glow_r) * pulse)
-            pygame.draw.circle(glow_surf, (0, 200, 255, alpha), (glow_r, glow_r), ring, 2)
-        self.screen.blit(glow_surf, (cx - glow_r, cy - 180 - glow_r + 50))
+        # Logo with animated glow
+        pulse = 0.6 + abs(math.sin(self.frame * 0.025)) * 0.4
+        glow_color = (0, int(200 * pulse), int(255 * pulse))
         
-        # Logo
-        logo_pulse = 0.7 + abs(math.sin(self.frame * 0.025)) * 0.3
-        glow_color = (0, min(255, int(200 * logo_pulse + 55)), 255)
-        logo = self.font_xl.render("SACRILEGE", True, glow_color)
-        self.screen.blit(logo, (cx - logo.get_width() // 2, cy - 120))
+        # Large title
+        title = self.font_xl.render("SACRILEGE", True, glow_color)
+        self.screen.blit(title, (cx - title.get_width() // 2, 40))
         
         # Subtitle
-        sub = self.font_lg.render("CS2 DEMO INTELLIGENCE SYSTEM", True, Theme.GRAY)
-        self.screen.blit(sub, (cx - sub.get_width() // 2, cy - 75))
+        sub = self.font_lg.render("CS2 DEMO INTELLIGENCE VIEWER", True, Theme.GRAY)
+        self.screen.blit(sub, (cx - sub.get_width() // 2, 85))
         
-        # Version
-        ver = self.font_xs.render("v1.5.0", True, Theme.MUTED)
-        self.screen.blit(ver, (cx - ver.get_width() // 2, cy - 52))
+        # Separator line with gradient
+        line_w = 400
+        sep_y = 120
+        for i in range(line_w):
+            progress = 1.0 - abs(i - line_w/2) / (line_w/2)
+            alpha_color = (int(60 * progress), int(140 * progress), int(255 * progress))
+            pygame.draw.line(self.screen, alpha_color, (cx - line_w//2 + i, sep_y), (cx - line_w//2 + i, sep_y + 1))
         
-        # Divider
-        div_w = 300
-        pygame.draw.line(self.screen, Theme.BORDER, (cx - div_w // 2, cy - 35), (cx + div_w // 2, cy - 35), 1)
+        # Section header - SELECT DEMO
+        header_y = 140
+        header = self.font_lg.render(f"SELECT DEMO ({len(self.available_demos)} files)", True, Theme.ACCENT)
+        self.screen.blit(header, (cx - header.get_width() // 2, header_y))
         
-        # Animated "Open Demo" prompt
-        open_pulse = abs(math.sin(self.frame * 0.04)) * 0.4 + 0.6
-        btn_w, btn_h = 260, 44
-        btn_x, btn_y = cx - btn_w // 2, cy - 10
+        # Demo file list
+        list_x = cx - 280
+        list_w = 560
+        list_y_start = header_y + 40
+        item_h = 44
+        mx, my = pygame.mouse.get_pos()
         
-        # Button glow
-        glow_s = pygame.Surface((btn_w + 20, btn_h + 20), pygame.SRCALPHA)
-        pygame.draw.rect(glow_s, (0, 200, 255, int(40 * open_pulse)), (0, 0, btn_w + 20, btn_h + 20), border_radius=14)
-        self.screen.blit(glow_s, (btn_x - 10, btn_y - 10))
+        # Clip region for scrollable list
+        max_visible_h = self.height - list_y_start - 60
+        clip_rect = pygame.Rect(list_x - 5, list_y_start, list_w + 10, max_visible_h)
+        self.screen.set_clip(clip_rect)
         
-        # Button
-        pygame.draw.rect(self.screen, Theme.CARD, (btn_x, btn_y, btn_w, btn_h), border_radius=10)
-        pygame.draw.rect(self.screen, Theme.ACCENT, (btn_x, btn_y, btn_w, btn_h), 2, border_radius=10)
+        if self.available_demos:
+            for i, demo_path in enumerate(self.available_demos):
+                item_y = list_y_start + i * item_h - self.file_browser_scroll
+                
+                # Skip items outside visible area
+                if item_y + item_h < list_y_start or item_y > list_y_start + max_visible_h:
+                    continue
+                
+                # Hover detection
+                hovering = list_x <= mx <= list_x + list_w and item_y <= my <= item_y + item_h - 4
+                
+                # Card background
+                if hovering:
+                    bg_color = Theme.CARD_HOVER
+                    # Glow effect
+                    glow_surf = pygame.Surface((list_w + 8, item_h), pygame.SRCALPHA)
+                    pygame.draw.rect(glow_surf, (0, 140, 255, 30), (0, 0, list_w + 8, item_h), border_radius=8)
+                    self.screen.blit(glow_surf, (list_x - 4, item_y))
+                else:
+                    bg_color = Theme.CARD
+                
+                pygame.draw.rect(self.screen, bg_color, (list_x, item_y, list_w, item_h - 4), border_radius=8)
+                
+                # Accent bar
+                accent = Theme.ACCENT if hovering else Theme.BORDER
+                pygame.draw.rect(self.screen, accent, (list_x, item_y + 6, 4, item_h - 16), border_radius=2)
+                
+                # Index number
+                idx_txt = self.font_sm.render(f"{i+1:02d}", True, Theme.MUTED)
+                self.screen.blit(idx_txt, (list_x + 14, item_y + 12))
+                
+                # Demo filename (without extension)
+                name = demo_path.stem
+                name_color = Theme.WHITE if hovering else Theme.GRAY
+                name_txt = self.font_md.render(name, True, name_color)
+                self.screen.blit(name_txt, (list_x + 50, item_y + 8))
+                
+                # File size
+                try:
+                    size_mb = demo_path.stat().st_size / (1024 * 1024)
+                    size_txt = self.font_xs.render(f"{size_mb:.0f} MB", True, Theme.MUTED)
+                    self.screen.blit(size_txt, (list_x + list_w - 60, item_y + 14))
+                except:
+                    pass
+                
+                # Map name hint from filename
+                for map_key in ['dust2', 'mirage', 'inferno', 'nuke', 'ancient', 'overpass', 'anubis', 'vertigo', 'train']:
+                    if map_key in name.lower():
+                        map_color = Theme.CT if hovering else Theme.DIM
+                        map_txt = self.font_xs.render(map_key.upper(), True, map_color)
+                        self.screen.blit(map_txt, (list_x + 50, item_y + 26))
+                        break
+        else:
+            # No demos found
+            no_demos = self.font_md.render("No .dem files found in 'demo files/' directory", True, Theme.MUTED)
+            self.screen.blit(no_demos, (cx - no_demos.get_width() // 2, cy))
         
-        open_color = (int(min(255, 100 + 155 * open_pulse)), int(min(255, 220 + 35 * open_pulse)), 255)
-        open_txt = self.font_lg.render("Press O to Open Demo", True, open_color)
-        self.screen.blit(open_txt, (cx - open_txt.get_width() // 2, btn_y + 12))
+        # Remove clip
+        self.screen.set_clip(None)
         
-        # Feature list
-        features = [
-            ("🎯", "Death Analysis & Blame Attribution"),
-            ("🗺️", "Interactive Heatmaps & Player Trails"),
-            ("🤖", "AI Coach Integration (Ollama)"),
-            ("📊", "Live Performance Rankings (S-F)"),
-        ]
-        
-        fy = cy + 55
-        for icon, text in features:
-            icon_txt = self.font_md.render(icon, True, Theme.WHITE)
-            feat_txt = self.font_sm.render(text, True, Theme.GRAY)
-            self.screen.blit(icon_txt, (cx - 150, fy))
-            self.screen.blit(feat_txt, (cx - 120, fy + 2))
-            fy += 26
+        # Scroll indicator
+        total_h = len(self.available_demos) * item_h
+        if total_h > max_visible_h:
+            scroll_ratio = self.file_browser_scroll / max(1, total_h - max_visible_h)
+            bar_h = max(30, int(max_visible_h * (max_visible_h / total_h)))
+            bar_y = list_y_start + int((max_visible_h - bar_h) * scroll_ratio)
+            pygame.draw.rect(self.screen, Theme.BORDER, (list_x + list_w + 4, bar_y, 4, bar_h), border_radius=2)
         
         # Bottom hint
-        hint = self.font_xs.render("Drag & drop .dem file or pass as CLI argument", True, Theme.DIM)
-        self.screen.blit(hint, (cx - hint.get_width() // 2, self.height - 40))
-    
-    def _draw_help_overlay(self):
-        """Draw semi-transparent help overlay with all keyboard shortcuts."""
-        # Semi-transparent backdrop
-        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
-        self.screen.blit(overlay, (0, 0))
+        hint = self.font_sm.render("Click a demo to load  •  Scroll to browse  •  Press O to refresh", True, Theme.MUTED)
+        self.screen.blit(hint, (cx - hint.get_width() // 2, self.height - 50))
         
-        # Panel
-        pw, ph = 500, 480
-        px = (self.width - pw) // 2
-        py = (self.height - ph) // 2
-        
-        pygame.draw.rect(self.screen, Theme.PANEL, (px, py, pw, ph), border_radius=12)
-        pygame.draw.rect(self.screen, Theme.ACCENT, (px, py, pw, ph), 2, border_radius=12)
-        
-        # Title
-        title = self.font_xl.render("KEYBOARD SHORTCUTS", True, Theme.ACCENT)
-        self.screen.blit(title, (px + pw // 2 - title.get_width() // 2, py + 15))
-        pygame.draw.line(self.screen, Theme.BORDER, (px + 20, py + 55), (px + pw - 20, py + 55), 1)
-        
-        # Shortcut groups
-        groups = [
-            ("PLAYBACK", [
-                ("Space", "Play / Pause"),
-                ("← →", "Seek backward / forward"),
-                ("↑ ↓", "Speed up / slow down"),
-                ("E / R", "Previous / Next round"),
-                ("Home / End", "Jump to start / end"),
-            ]),
-            ("FILES & EXPORT", [
-                ("O", "Open demo file"),
-                ("J", "Export analysis as JSON"),
-                ("F12", "Take screenshot"),
-                ("Shift+M", "Export heatmap as PNG"),
-            ]),
-            ("OVERLAYS", [
-                ("M", "Toggle heatmap overlay"),
-                ("T", "Toggle player trails"),
-                ("N", "Filter heatmap by round"),
-                ("1-5", "Heatmap mode (All/Kill/Death/CT/T)"),
-            ]),
-            ("OTHER", [
-                ("C", "AI Coach analysis"),
-                ("B", "Bookmark current position"),
-                ("F", "Toggle fullscreen"),
-                ("H", "Toggle this help panel"),
-            ]),
-        ]
-        
-        cy = py + 65
-        for group_name, shortcuts in groups:
-            # Group header
-            self.screen.blit(self.font_md.render(group_name, True, Theme.ACCENT2), (px + 25, cy))
-            cy += 22
-            for key, desc in shortcuts:
-                # Key badge
-                key_txt = self.font_sm.render(key, True, Theme.WHITE)
-                key_w = max(60, key_txt.get_width() + 16)
-                pygame.draw.rect(self.screen, Theme.CARD_ACTIVE, (px + 30, cy, key_w, 20), border_radius=4)
-                self.screen.blit(key_txt, (px + 30 + (key_w - key_txt.get_width()) // 2, cy + 3))
-                # Description
-                self.screen.blit(self.font_sm.render(desc, True, Theme.GRAY), (px + 30 + key_w + 12, cy + 3))
-                cy += 24
-            cy += 8
-        
-        # Close hint
-        close_txt = self.font_sm.render("Press H to close", True, Theme.MUTED)
-        self.screen.blit(close_txt, (px + pw // 2 - close_txt.get_width() // 2, py + ph - 30))
+        # Version info
+        ver = self.font_xs.render("Sacrilege Engine v2.0  •  Powered by demoparser2 + Ollama", True, Theme.DIM)
+        self.screen.blit(ver, (cx - ver.get_width() // 2, self.height - 28))
     
     def _draw_header(self, tick):
         # Header bar
@@ -1360,14 +1398,13 @@ if filepath:
         
         # Animated logo
         pulse = 0.5 + abs(math.sin(self.frame * 0.03)) * 0.5
-        glow = (0, min(255, int(180 * pulse + 75)), 255)  # Cyan glow, clamped
+        glow = (0, min(255, int(180 * pulse + 75)), 255)
         logo = self.font_xl.render("SACRILEGE", True, glow)
         self.screen.blit(logo, (15, 10))
         
         # Demo filename
-        if self.demo_path:
-            demo_name = self.demo_path.stem.replace('-', ' ').upper()
-            demo_txt = self.font_sm.render(demo_name, True, Theme.GRAY)
+        if self.demo_filename:
+            demo_txt = self.font_sm.render(self.demo_filename, True, Theme.GRAY)
             self.screen.blit(demo_txt, (18, 38))
         else:
             sub = self.font_xs.render("CS2 DEMO VIEWER", True, Theme.GRAY)
@@ -1375,7 +1412,6 @@ if filepath:
         
         # Accent line with gradient effect
         for i in range(3):
-            alpha = 255 - i * 60
             pygame.draw.line(self.screen, (*Theme.ACCENT[:3],), (0, 51 - i), (self.width, 51 - i), 1)
         
         # Playback info
@@ -1385,6 +1421,11 @@ if filepath:
         
         speed_txt = f"{self.speed}x"
         self.screen.blit(self.font_md.render(speed_txt, True, Theme.ACCENT), (self.width - 180, 30))
+        
+        # Chat mode indicator
+        if self.chat_active:
+            pygame.draw.rect(self.screen, Theme.ACCENT2, (self.width - 280, 14, 80, 20), border_radius=6)
+            self.screen.blit(self.font_xs.render("CHAT ON", True, Theme.WHITE), (self.width - 270, 17))
         
         # FPS
         fps_txt = f"{int(self.fps)} FPS"
@@ -1396,17 +1437,11 @@ if filepath:
         
         ct_alive = sum(1 for p in players if p['team'] == 'CT' and p['alive'])
         t_alive = sum(1 for p in players if p['team'] == 'T' and p['alive'])
-        ct_rounds = self.round_wins.get('CT', 0)
-        t_rounds = self.round_wins.get('T', 0)
         
         # CT box
         pygame.draw.rect(self.screen, Theme.CT_DARK, (cx - 185, sy, 160, 48), border_radius=6)
         pygame.draw.rect(self.screen, Theme.CT, (cx - 185, sy, 4, 48), border_top_left_radius=6, border_bottom_left_radius=6)
         self.screen.blit(self.font_lg.render("CT", True, Theme.CT_LIGHT), (cx - 175, sy + 8))
-        
-        # CT round wins
-        ct_score = self.font_xl.render(str(ct_rounds), True, Theme.CT_LIGHT)
-        self.screen.blit(ct_score, (cx - 45 - ct_score.get_width(), sy + 8))
         
         # CT alive indicator dots
         for i in range(5):
@@ -1414,21 +1449,16 @@ if filepath:
             pygame.draw.circle(self.screen, color, (cx - 170 + i * 18, sy + 38), 5)
         
         # Center - Map and Round
-        pygame.draw.rect(self.screen, Theme.CARD, (cx - 35, sy, 70, 48), border_radius=6)
+        pygame.draw.rect(self.screen, Theme.CARD, (cx - 55, sy, 110, 48), border_radius=6)
         map_txt = self.map_config.display_name if self.map_config else "UNKNOWN"
-        map_surf = self.font_xs.render(map_txt, True, Theme.GRAY)
-        self.screen.blit(map_surf, (cx - map_surf.get_width() // 2, sy + 4))
+        self.screen.blit(self.font_sm.render(map_txt, True, Theme.GRAY), (cx - 30, sy + 6))
         rd = self.font_lg.render(f"R{self.current_round}", True, Theme.WHITE)
-        self.screen.blit(rd, (cx - rd.get_width()//2, sy + 22))
+        self.screen.blit(rd, (cx - rd.get_width()//2, sy + 24))
         
         # T box
         pygame.draw.rect(self.screen, Theme.T_DARK, (cx + 25, sy, 160, 48), border_radius=6)
         pygame.draw.rect(self.screen, Theme.T, (cx + 181, sy, 4, 48), border_top_right_radius=6, border_bottom_right_radius=6)
         self.screen.blit(self.font_lg.render("T", True, Theme.T_LIGHT), (cx + 155, sy + 8))
-        
-        # T round wins
-        t_score = self.font_xl.render(str(t_rounds), True, Theme.T_LIGHT)
-        self.screen.blit(t_score, (cx + 45, sy + 8))
         
         # T alive indicator dots
         for i in range(5):
@@ -1465,7 +1495,7 @@ if filepath:
     def _draw_player_card(self, p, x, y, w):
         h = 50
         alive = p['alive']
-        is_selected = p['id'] == self.selected_player
+        is_selected = p['name'] == self.selected_player
         
         # Background with selection/hover effect
         if is_selected:
@@ -1506,15 +1536,17 @@ if filepath:
         name_color = Theme.WHITE if alive else Theme.MUTED
         self.screen.blit(self.font_md.render(p['name'], True, name_color), (x + 48, y + 6))
         
-        # Player grade indicator (from cached rankings)
-        for r in self._cached_rankings:
-            if r.name == p['name']:
-                grade = r.rank_grade
-                grade_color = get_grade_color(grade)
-                # Draw grade badge
-                pygame.draw.rect(self.screen, grade_color, (x + w - 28, y + 4, 22, 18), border_radius=4)
-                self.screen.blit(self.font_sm.render(grade, True, Theme.BG), (x + w - 22, y + 5))
-                break
+        # Player grade indicator (from death analyzer)
+        if self.death_analyzer:
+            rankings = self.death_analyzer.get_rankings()
+            for r in rankings:
+                if r.name == p['name']:
+                    grade = r.rank_grade
+                    grade_color = get_grade_color(grade)
+                    # Draw grade badge
+                    pygame.draw.rect(self.screen, grade_color, (x + w - 28, y + 4, 22, 18), border_radius=4)
+                    self.screen.blit(self.font_sm.render(grade, True, Theme.BG), (x + w - 22, y + 5))
+                    break
         
         if alive:
             # HP bar with gradient feel
@@ -1690,21 +1722,6 @@ if filepath:
         pygame.draw.circle(self.screen, color, (x, y), 10)
         pygame.draw.circle(self.screen, light, (x, y), 10, 2)
         
-        # View direction indicator (triangle)
-        yaw = p.get('yaw', 0)
-        # CS2 yaw: 0=east, 90=north, convert to screen coords (Y flipped)
-        yaw_rad = math.radians(yaw)
-        arrow_len = 18
-        tip_x = x + int(math.cos(yaw_rad) * arrow_len)
-        tip_y = y - int(math.sin(yaw_rad) * arrow_len)  # Y flipped
-        # Triangle wing points
-        wing_angle = 2.5  # radians offset
-        w1_x = x + int(math.cos(yaw_rad + wing_angle) * 8)
-        w1_y = y - int(math.sin(yaw_rad + wing_angle) * 8)
-        w2_x = x + int(math.cos(yaw_rad - wing_angle) * 8)
-        w2_y = y - int(math.sin(yaw_rad - wing_angle) * 8)
-        pygame.draw.polygon(self.screen, light, [(tip_x, tip_y), (w1_x, w1_y), (w2_x, w2_y)])
-        
         # Bomb carrier - pulsing
         if p.get('bomb'):
             pulse = abs(math.sin(self.frame * 0.15)) * 4
@@ -1735,100 +1752,91 @@ if filepath:
     def _draw_killfeed(self):
         from src.intelligence.death_analyzer import DeathAnalyzer
         
-        kx, ky = self.width - 325, 115
-        kw = 310
+        kx, ky = self.width - 345, 115
+        kw = 330
         
-        # Reduced height to 170
         pygame.draw.rect(self.screen, Theme.PANEL, (kx - 5, ky - 5, kw + 10, 170), border_radius=6)
-        self.screen.blit(self.font_sm.render("KILL FEED", True, Theme.GRAY), (kx, ky))
+        self.screen.blit(self.font_md.render("KILL FEED", True, Theme.GRAY), (kx + 4, ky))
         
-        ky += 20
-        for i, k in enumerate(self.recent_kills[-5:]):
-            y = ky + i * 30
+        ky += 22
+        for i, k in enumerate(self.recent_kills[-4:]):
+            y = ky + i * 36
             
             # Kill row background
-            pygame.draw.rect(self.screen, (0, 0, 0, 120), (kx, y, kw, 28), border_radius=3)
+            pygame.draw.rect(self.screen, (0, 0, 0, 120), (kx, y, kw, 32), border_radius=4)
             
             # Attacker
             kc = Theme.CT if k['attacker_team'] == 'CT' else Theme.T
-            self.screen.blit(self.font_sm.render(k['attacker'][:8], True, kc), (kx + 5, y + 2))
+            self.screen.blit(self.font_sm.render(k['attacker'][:10], True, kc), (kx + 6, y + 3))
             
             # Weapon + HS
-            hs = "HS" if k['hs'] else ""
-            weapon = f"[{k['weapon'][:6]}]{hs}"
-            self.screen.blit(self.font_xs.render(weapon, True, Theme.MUTED), (kx + 80, y + 4))
+            hs = " HS" if k['hs'] else ""
+            weapon = f"[{k['weapon'][:8]}]{hs}"
+            self.screen.blit(self.font_xs.render(weapon, True, Theme.MUTED), (kx + 110, y + 5))
             
             # Victim
-            vc = Theme.CT if k.get('victim_team', 'T') == 'CT' else Theme.T
-            self.screen.blit(self.font_sm.render(k['victim'][:8], True, Theme.DANGER), (kx + 155, y + 2))
+            self.screen.blit(self.font_sm.render(k['victim'][:10], True, Theme.DANGER), (kx + 200, y + 3))
             
-            # Death reason - find matching analysis
-            reason = ""
+            # Death reason
             if self.death_analyzer:
                 for analysis in self.death_analyzer.round_deaths:
                     if analysis.victim_name == k['victim']:
                         primary = analysis.primary_mistake()
                         label = DeathAnalyzer.get_mistake_label(primary)
                         color = DeathAnalyzer.get_mistake_color(primary)
-                        self.screen.blit(self.font_xs.render(label, True, color), (kx + 5, y + 15))
+                        self.screen.blit(self.font_xs.render(label, True, color), (kx + 6, y + 19))
                         break
     
     def _draw_round_stats(self, players):
-        # Position: 115 + 170 (killfeed) + 10 (gap) = 295
-        sx, sy = self.width - 325, 295
-        sw, sh = 310, 140
+        sx, sy = self.width - 345, 295
+        sw, sh = 330, 130
         
         pygame.draw.rect(self.screen, Theme.PANEL, (sx - 5, sy, sw + 10, sh), border_radius=6)
         
         # Header
-        self.screen.blit(self.font_lg.render("LIVE STATISTICS", True, Theme.ACCENT), (sx + 5, sy + 8))
-        pygame.draw.line(self.screen, Theme.BORDER, (sx, sy + 30), (sx + sw, sy + 30), 1)
+        self.screen.blit(self.font_lg.render("LIVE STATISTICS", True, Theme.ACCENT), (sx + 5, sy + 6))
+        pygame.draw.line(self.screen, Theme.BORDER, (sx, sy + 28), (sx + sw, sy + 28), 1)
         
-        cy = sy + 36
+        cy = sy + 34
         
-        # Round Kills
-        self.screen.blit(self.font_md.render("Round Kills", True, Theme.WHITE), (sx + 5, cy))
+        # Round Kills - bigger numbers
+        self.screen.blit(self.font_md.render("Round Kills", True, Theme.WHITE), (sx + 8, cy))
         ct_k = str(self.round_kills.get('CT', 0))
         t_k = str(self.round_kills.get('T', 0))
-        self.screen.blit(self.font_lg.render(ct_k, True, Theme.CT), (sx + 140, cy - 2))
-        self.screen.blit(self.font_md.render(":", True, Theme.GRAY), (sx + 170, cy))
-        self.screen.blit(self.font_lg.render(t_k, True, Theme.T), (sx + 190, cy - 2))
-        cy += 24
+        self.screen.blit(self.font_xl.render(ct_k, True, Theme.CT), (sx + 160, cy - 6))
+        self.screen.blit(self.font_lg.render(":", True, Theme.MUTED), (sx + 200, cy))
+        self.screen.blit(self.font_xl.render(t_k, True, Theme.T), (sx + 220, cy - 6))
+        cy += 30
         
-        # Team HP with bars
+        # Team HP
         ct_hp = sum(p['hp'] for p in players if p['team'] == 'CT' and p['alive'])
         t_hp = sum(p['hp'] for p in players if p['team'] == 'T' and p['alive'])
-        self.screen.blit(self.font_md.render("Team HP", True, Theme.WHITE), (sx + 5, cy))
-        self.screen.blit(self.font_md.render(str(ct_hp), True, Theme.CT), (sx + 140, cy))
-        self.screen.blit(self.font_md.render(":", True, Theme.GRAY), (sx + 170, cy))
-        self.screen.blit(self.font_md.render(str(t_hp), True, Theme.T), (sx + 190, cy))
-        cy += 24
+        self.screen.blit(self.font_md.render("Team HP", True, Theme.WHITE), (sx + 8, cy))
+        self.screen.blit(self.font_lg.render(str(ct_hp), True, Theme.CT), (sx + 160, cy - 2))
+        self.screen.blit(self.font_md.render(":", True, Theme.MUTED), (sx + 200, cy))
+        self.screen.blit(self.font_lg.render(str(t_hp), True, Theme.T), (sx + 220, cy - 2))
+        cy += 28
         
-        # Equipment
+        # Equipment + Utility on same row
         ct_eq = sum(p['equip'] for p in players if p['team'] == 'CT' and p['alive'])
         t_eq = sum(p['equip'] for p in players if p['team'] == 'T' and p['alive'])
-        self.screen.blit(self.font_md.render("Equipment", True, Theme.WHITE), (sx + 5, cy))
-        self.screen.blit(self.font_sm.render(f"${ct_eq}", True, Theme.CT), (sx + 130, cy + 2))
-        self.screen.blit(self.font_sm.render(f"${t_eq}", True, Theme.T), (sx + 200, cy + 2))
-        cy += 24
+        self.screen.blit(self.font_md.render("Equip", True, Theme.WHITE), (sx + 8, cy))
+        self.screen.blit(self.font_sm.render(f"${ct_eq}", True, Theme.CT), (sx + 100, cy + 2))
+        self.screen.blit(self.font_sm.render(f"${t_eq}", True, Theme.T), (sx + 170, cy + 2))
         
-        # Active Utility
         tick = self.all_ticks[self.tick_idx] if self.all_ticks else 0
         active_smokes = sum(1 for s in self.smokes if s['start'] <= tick <= s['end'])
         active_mollies = sum(1 for m in self.mollies if m['start'] <= tick <= m['end'])
-        
-        self.screen.blit(self.font_md.render("Active Utility", True, Theme.ACCENT2), (sx + 5, cy))
-        pygame.draw.circle(self.screen, Theme.SMOKE, (sx + 140, cy + 8), 6)
-        self.screen.blit(self.font_sm.render(f"{active_smokes}", True, Theme.WHITE), (sx + 152, cy + 2))
-        pygame.draw.circle(self.screen, Theme.FIRE, (sx + 185, cy + 8), 6)
-        self.screen.blit(self.font_sm.render(f"{active_mollies}", True, Theme.WHITE), (sx + 197, cy + 2))
+        pygame.draw.circle(self.screen, Theme.SMOKE, (sx + 250, cy + 8), 6)
+        self.screen.blit(self.font_sm.render(f"{active_smokes}", True, Theme.WHITE), (sx + 262, cy + 2))
+        pygame.draw.circle(self.screen, Theme.FIRE, (sx + 290, cy + 8), 6)
+        self.screen.blit(self.font_sm.render(f"{active_mollies}", True, Theme.WHITE), (sx + 302, cy + 2))
     
     def _draw_timeline(self, tick):
         ty = self.height - 48
-        # Timeline spans from radar left edge to just before right panels
-        tx = 400
-        right_panel_x = self.width - 330
-        tw = max(100, right_panel_x - tx - 50)
+        # Timeline ends before the right panel stack (1275)
+        # 1275 - 380 = 895. Use 880 for safety.
+        tx, tw = 380, 880
         
         # Background
         pygame.draw.rect(self.screen, Theme.PANEL, (tx - 18, ty - 10, tw + 36, 36), border_radius=8)
@@ -1906,7 +1914,7 @@ if filepath:
                 
                 # Draw larger popup box with full analytics
                 box_w = 200
-                box_h = 155
+                box_h = 120
                 box_x = min(x + 15, rx + self.radar_size - box_w - 10)
                 box_y = max(y - box_h // 2, ry + 10)
                 
@@ -1944,6 +1952,12 @@ if filepath:
                 self.screen.blit(self.font_xs.render(trade, True, trade_color), (box_x + 12, cy))
                 
                 blame = analysis.blame_score()
+                # AI Coach Hint
+                cy += 20
+                if self.ai_coach and self.ai_coach.available:
+                    pygame.draw.rect(self.screen, (100, 50, 255), (box_x + 10, cy + box_y - box_y, box_w - 20, 18), border_radius=4)
+                    self.screen.blit(self.font_xs.render("Press C for AI Coach", True, Theme.WHITE), (box_x + 45, cy + 2))
+
                 blame_color = (100, 200, 100) if blame < 40 else (255, 180, 50) if blame < 60 else (255, 80, 80)
                 self.screen.blit(self.font_xs.render(f"Blame: {blame:.0f}%", True, blame_color), (box_x + 110, cy))
                 
@@ -1952,14 +1966,6 @@ if filepath:
                 if len(analysis.mistakes) > 1:
                     other = ", ".join([DeathAnalyzer.get_mistake_label(m) for m in analysis.mistakes[1:3]])
                     self.screen.blit(self.font_xs.render(f"+{other}", True, Theme.MUTED), (box_x + 12, cy))
-                
-                # AI Coach Hint
-                cy += 18
-                if self.ai_coach and self.ai_coach.available:
-                    pill_w = box_w - 24
-                    pygame.draw.rect(self.screen, (100, 50, 255), (box_x + 12, cy, pill_w, 18), border_radius=4)
-                    hint = self.font_xs.render("Press C for AI Coach", True, Theme.WHITE)
-                    self.screen.blit(hint, (box_x + 12 + (pill_w - hint.get_width()) // 2, cy + 2))
                 
                 # Line to death position
                 pygame.draw.line(self.screen, (*color, min(150, alpha)), (x, y), (box_x, box_y + box_h // 2), 2)
@@ -1971,10 +1977,10 @@ if filepath:
         
         from src.intelligence.death_analyzer import DeathAnalyzer
         
-        # Panel position - below round stats (stats ends at 295+140=435)
-        px = self.width - 325
-        py = 445 
-        pw = 310
+        # Panel position - below round stats (stats ends at 295+130=425)
+        px = self.width - 345
+        py = 435
+        pw = 330
         ph = 240
         
         pygame.draw.rect(self.screen, Theme.PANEL, (px - 5, py, pw + 10, ph), border_radius=6)
@@ -1983,7 +1989,7 @@ if filepath:
         self.screen.blit(self.font_lg.render("LIVE RANKINGS", True, Theme.ACCENT), (px + 5, py + 8))
         pygame.draw.line(self.screen, Theme.BORDER, (px, py + 34), (px + pw, py + 34), 1)
         
-        rankings = self._cached_rankings
+        rankings = self.death_analyzer.get_rankings()
         cy = py + 42
         
         # Show top 8 players
@@ -2023,48 +2029,118 @@ if filepath:
     def _call_ai_coach(self):
         """Trigger AI coaching for the latest or selected death."""
         if not self.ai_coach or not self.ai_coach.available:
-            print("⚠ AI Coach unavailable")
+            self.chat_messages.append({'role': 'coach', 'text': '⚠ AI Coach unavailable. Start Ollama to use chat.', 'time': self.frame})
             return
         
         # Get most recent death popup or selected player's last death
         target_analysis = None
         
         if self.death_popups:
-            # Case 1: Active death popup - specific feedback
             target_analysis = self.death_popups[-1][0]
             print(f"⚡ Asking Qwen to review death for {target_analysis.victim_name}...")
             prompt = self.death_analyzer.get_llm_prompt(target_analysis)
             
         elif self.selected_player and self.death_analyzer:
-            # Case 2: No popup, player selected - DEEP ANALYSIS
-            # selected_player is a steam_id, look up the player name for stats
-            player_info = self.players.get(self.selected_player, {})
-            player_name = player_info.get('name', self.selected_player)
-            stats = self.death_analyzer.player_stats.get(player_name)
+            stats = self.death_analyzer.player_stats.get(self.selected_player)
             if not stats:
-                print(f"⚠ No stats found for {player_name}")
+                self.chat_messages.append({'role': 'coach', 'text': f'No stats found for that player yet.', 'time': self.frame})
                 return
                 
-            print(f"⚡ Asking Qwen for deep analysis on {player_name}...")
+            print(f"⚡ Asking Qwen for deep analysis on {self.selected_player}...")
             prompt = self.death_analyzer.get_player_analysis_prompt(stats)
             
         else:
-            print("⚠ Select a player or wait for a death to coach")
+            # Activate chat mode instead
+            self.chat_active = True
             return
         
-        # Define callback
+        # Add user-visible message  
+        self.chat_messages.append({'role': 'user', 'text': f'[Auto] Analyze: {prompt[:80]}...', 'time': self.frame})
+        self.chat_waiting = True
+        
         def on_response(text):
             print(f"⚡ Coach says: {text}")
-            # Add to insights list to display on screen
-            expire = self.all_ticks[self.tick_idx] + 1280 # Show for 20 seconds (longer for analysis)
-            self.ai_insights.append(('coach', text, expire))
+            self.chat_messages.append({'role': 'coach', 'text': text, 'time': self.frame})
+            self.chat_waiting = False
+            # Also add to insights for on-screen display
+            if self.all_ticks:
+                expire = self.all_ticks[self.tick_idx] + 1280
+                self.ai_insights.append(('coach', text, expire))
             
-        # Call LLM async
         self.ai_coach.generate_async(
             prompt, 
             on_response, 
             system_prompt=self.ai_coach.get_coach_persona()
         )
+    
+    def _send_chat_message(self, text: str):
+        """Send a user chat message to the AI coach."""
+        # Add user message to chat display
+        self.chat_messages.append({'role': 'user', 'text': text, 'time': self.frame})
+        self.chat_scroll = 0  # Scroll to bottom
+        
+        if not self.ai_coach or not self.ai_coach.available:
+            self.chat_messages.append({
+                'role': 'coach', 
+                'text': '⚠ AI Coach unavailable. Start Ollama (ollama serve) and ensure qwen2.5 is pulled.',
+                'time': self.frame
+            })
+            return
+        
+        self.chat_waiting = True
+        
+        # Build game context from current state
+        context = self._build_chat_context()
+        
+        def on_response(response_text):
+            self.chat_messages.append({
+                'role': 'coach',
+                'text': response_text,
+                'time': self.frame
+            })
+            self.chat_waiting = False
+            self.chat_scroll = 0
+        
+        # Use multi-turn chat
+        self.ai_coach.chat_async(
+            user_message=text,
+            callback=on_response,
+            context=context,
+            system_prompt=self.ai_coach.get_chat_persona()
+        )
+    
+    def _build_chat_context(self) -> str:
+        """Build game context string from current demo state for the AI."""
+        parts = []
+        
+        if self.map_config:
+            parts.append(f"Map: {self.map_config.display_name}")
+        parts.append(f"Round: {self.current_round}/{len(self.rounds)}")
+        
+        if self.demo_filename:
+            parts.append(f"Demo: {self.demo_filename}")
+        
+        # Current round kills
+        parts.append(f"Round Kills - CT: {self.round_kills.get('CT', 0)}, T: {self.round_kills.get('T', 0)}")
+        
+        # Player rankings
+        if self.death_analyzer:
+            rankings = self.death_analyzer.get_rankings()
+            if rankings:
+                parts.append("\nPlayer Rankings:")
+                for i, r in enumerate(rankings[:10]):
+                    parts.append(f"  #{i+1} [{r.rank_grade}] {r.name} ({r.team}) - K:{r.kills} D:{r.deaths} Blame:{r.avg_blame:.0f}%")
+        
+        # Recent deaths with analysis
+        if self.death_analyzer and self.death_analyzer.round_deaths:
+            parts.append("\nRecent Deaths This Round:")
+            for d in self.death_analyzer.round_deaths[-5:]:
+                primary = d.primary_mistake()
+                from src.intelligence.death_analyzer import DeathAnalyzer
+                label = DeathAnalyzer.get_mistake_label(primary)
+                parts.append(f"  {d.victim_name} killed by {d.attacker_name} - {label} (Blame: {d.blame_score():.0f}%)")
+        
+        return "\n".join(parts)
 
     def _draw_heatmap_overlay(self, rx, ry):
         """Draw PRECISE heatmap - only exact event positions, no interpolation."""
@@ -2157,10 +2233,10 @@ if filepath:
         self.screen.blit(overlay, (rx, ry))
 
     def _draw_legend(self):
-        ly = self.height - 22
+        ly = self.height - 20
         lx = 15
         
-        # Utility legend
+        # Utility legend - compact row
         items = [
             (Theme.SMOKE, "Smoke"),
             (Theme.FIRE, "Fire"),
@@ -2170,109 +2246,222 @@ if filepath:
         
         for color, label in items:
             pygame.draw.circle(self.screen, color, (lx + 6, ly), 6)
-            txt = self.font_md.render(label, True, Theme.WHITE)
+            txt = self.font_sm.render(label, True, Theme.WHITE)
             self.screen.blit(txt, (lx + 16, ly - 8))
-            lx += txt.get_width() + 35
+            lx += txt.get_width() + 28
         
-        # Controls hint - compact on the right
-        hint = "SPC:Play  ←→:Seek  ↑↓:Spd  E/R:Rnd  M:Map  T:Trail  N:Filt  C:Coach"
-        hint_txt = self.font_xs.render(hint, True, Theme.GRAY)
-        self.screen.blit(hint_txt, (self.width - hint_txt.get_width() - 15, ly + 2))
+        # Controls - only essential keys, readable
+        controls = "SPACE Play  ←→ Seek  ↑↓ Speed  E/R Round  O Open  Enter Chat  M Heatmap  C Coach"
+        self.screen.blit(self.font_xs.render(controls, True, Theme.MUTED), (lx + 20, ly - 7))
     
-    def _draw_ai_insights(self):
-        """Draw AI coaching tips window."""
-        # Panel position - below Live Rankings (which ends at 445+240=685)
-        px = self.width - 325
-        py = 695
-        pw = 310
-        ph = 220
+    def _draw_chat_panel(self):
+        """Draw the interactive AI Coach chat panel with message history and input."""
+        px = self.width - 345
+        py = 685
+        pw = 330
+        ph = self.height - py - 35
         
-        # Panel background with glow
+        if ph < 80:
+            return  # Too small to draw
+        
+        # Panel background with glow when active
         surf = pygame.Surface((pw, ph), pygame.SRCALPHA)
         pygame.draw.rect(surf, (*Theme.PANEL[:3], 245), (0, 0, pw, ph), border_radius=8)
-        pygame.draw.rect(surf, Theme.ACCENT, (0, 0, pw, ph), 2, border_radius=8)
+        
+        border_color = Theme.ACCENT2 if self.chat_active else Theme.ACCENT
+        border_w = 2 if not self.chat_active else 3
+        pygame.draw.rect(surf, border_color, (0, 0, pw, ph), border_w, border_radius=8)
         self.screen.blit(surf, (px, py))
         
-        # Header
-        self.screen.blit(self.font_lg.render("AI COACH", True, Theme.ACCENT), (px + 15, py + 12))
+        # Header bar
+        pygame.draw.rect(self.screen, Theme.CARD, (px + 2, py + 2, pw - 4, 34), border_top_left_radius=7, border_top_right_radius=7)
+        self.screen.blit(self.font_lg.render("AI COACH", True, Theme.ACCENT), (px + 12, py + 8))
         
-        # Model indicator
-        if self.ai_coach:
+        # Model indicator + status dot
+        if self.ai_coach and self.ai_coach.available:
             model = self.ai_coach.model.split(':')[0].upper()
-            self.screen.blit(self.font_xs.render(model, True, Theme.MUTED), (px + pw - 60, py + 16))
-        
-        # Show latest insight
-        if self.ai_insights:
-            insight_type, text, _ = self.ai_insights[-1]
-            
-            # Wrap text
-            words = text.split()
-            lines = []
-            current_line = ""
-            for word in words:
-                test = current_line + " " + word if current_line else word
-                if self.font_md.size(test)[0] < pw - 30:
-                    current_line = test
-                else:
-                    if current_line:
-                        lines.append(current_line)
-                    current_line = word
-            if current_line:
-                lines.append(current_line)
-            
-            # Draw lines (max 8)
-            y = py + 50
-            for line in lines[:8]:
-                self.screen.blit(self.font_md.render(line, True, Theme.WHITE), (px + 15, y))
-                y += 24
+            pygame.draw.circle(self.screen, Theme.SUCCESS, (px + pw - 14, py + 20), 5)
+            self.screen.blit(self.font_xs.render(model, True, Theme.MUTED), (px + pw - 80, py + 14))
         else:
-            # Centered Placeholder
-            cx = px + pw // 2
-            cy = py + ph // 2 - 20
+            pygame.draw.circle(self.screen, Theme.DANGER, (px + pw - 14, py + 20), 5)
+            self.screen.blit(self.font_xs.render("OFFLINE", True, Theme.DANGER), (px + pw - 70, py + 14))
+        
+        # ── Input box (bottom, draw FIRST to get correct message area) ──
+        input_h = 36
+        input_y = py + ph - input_h - 6
+        input_w = pw - 16
+        
+        input_bg = Theme.CARD_ACTIVE if self.chat_active else Theme.CARD
+        pygame.draw.rect(self.screen, input_bg, (px + 8, input_y, input_w, input_h), border_radius=8)
+        
+        if self.chat_active:
+            # Active glow border
+            pygame.draw.rect(self.screen, Theme.ACCENT2, (px + 8, input_y, input_w, input_h), 2, border_radius=8)
             
-            # Pulsing waiting text
-            pulse = abs(math.sin(self.frame * 0.05)) * 100
-            cval = min(255, int(130 + pulse))
-            wait_color = (cval, cval, cval)
-            wait_txt = self.font_md.render("Waiting for analysis...", True, wait_color)
-            self.screen.blit(wait_txt, (cx - wait_txt.get_width()//2, cy - 20))
+            # Input text - scroll to show end of text
+            display_text = self.chat_input
+            max_text_w = input_w - 50  # Reserve space for send button
+            while display_text and self.font_md.size(display_text)[0] > max_text_w:
+                display_text = display_text[1:]  # Trim from left
             
-            # Centered Pill
-            pill_w = 200
-            pill_h = 28
-            pill_x = cx - pill_w // 2
-            pill_y = cy + 15
+            # Blinking cursor
+            cursor = "|" if (self.chat_cursor_blink // 25) % 2 == 0 else " "
+            txt = self.font_md.render(display_text + cursor, True, Theme.WHITE)
+            self.screen.blit(txt, (px + 16, input_y + 9))
             
-            pygame.draw.rect(self.screen, Theme.ACCENT2, (pill_x, pill_y, pill_w, pill_h), border_radius=14)
+            # Send button when there's text
+            if self.chat_input.strip():
+                send_x = px + 8 + input_w - 32
+                send_y = input_y + 4
+                pygame.draw.rect(self.screen, Theme.ACCENT, (send_x, send_y, 28, 28), border_radius=6)
+                pygame.draw.polygon(self.screen, Theme.WHITE, [
+                    (send_x + 8, send_y + 20), (send_x + 14, send_y + 6), (send_x + 20, send_y + 20)
+                ])
+        else:
+            placeholder = "Click or press Enter to chat..."
+            txt = self.font_sm.render(placeholder, True, Theme.MUTED)
+            self.screen.blit(txt, (px + 16, input_y + 10))
+        
+        # ── Chat messages area ──
+        msg_y_start = py + 40
+        msg_y_end = input_y - 6
+        msg_area_h = msg_y_end - msg_y_start
+        
+        if msg_area_h < 20:
+            return  # Too small
+        
+        clip_rect = pygame.Rect(px + 4, msg_y_start, pw - 8, msg_area_h)
+        self.screen.set_clip(clip_rect)
+        
+        if self.chat_messages:
+            y = msg_y_end - 4
+            scroll_offset = self.chat_scroll * 20
+            y += scroll_offset
             
-            # Pill text
-            hint_txt = self.font_sm.render("Press C to Coach Death", True, Theme.WHITE)
-            self.screen.blit(hint_txt, (pill_x + (pill_w - hint_txt.get_width())//2, pill_y + 6))
+            for msg in reversed(self.chat_messages):
+                role = msg['role']
+                text = msg['text']
+                
+                # Word wrap
+                max_w = pw - 50
+                wrapped_lines = []
+                for paragraph in text.split('\n'):
+                    if not paragraph.strip():
+                        wrapped_lines.append("")
+                        continue
+                    words = paragraph.split()
+                    current_line = ""
+                    for word in words:
+                        test = (current_line + " " + word) if current_line else word
+                        if self.font_sm.size(test)[0] < max_w:
+                            current_line = test
+                        else:
+                            if current_line:
+                                wrapped_lines.append(current_line)
+                            current_line = word
+                    if current_line:
+                        wrapped_lines.append(current_line)
+                
+                if not wrapped_lines:
+                    wrapped_lines = [""]
+                
+                line_h = 18
+                msg_padding = 10
+                msg_h = len(wrapped_lines) * line_h + msg_padding * 2
+                y -= msg_h + 4  # 4px gap between messages
+                
+                if y > msg_y_end + 80:
+                    continue
+                if y + msg_h < msg_y_start - 80:
+                    break
+                
+                # Calculate bubble width from longest line
+                max_line_w = max((self.font_sm.size(l)[0] for l in wrapped_lines if l), default=40)
+                bubble_w = min(pw - 40, max_line_w + 20)
+                
+                if role == 'user':
+                    # User bubble - right-aligned, blue
+                    bubble_x = px + pw - bubble_w - 12
+                    pygame.draw.rect(self.screen, (25, 55, 115), 
+                                   (bubble_x, y, bubble_w, msg_h), border_radius=10)
+                    pygame.draw.rect(self.screen, (40, 80, 160), 
+                                   (bubble_x, y, bubble_w, msg_h), 1, border_radius=10)
+                    
+                    ly = y + msg_padding
+                    for line in wrapped_lines:
+                        if line:
+                            self.screen.blit(self.font_sm.render(line, True, Theme.CT_LIGHT), 
+                                           (bubble_x + 10, ly))
+                        ly += line_h
+                else:
+                    # Coach bubble - left-aligned, dark with accent bar
+                    bubble_x = px + 12
+                    pygame.draw.rect(self.screen, (24, 28, 40), 
+                                   (bubble_x, y, bubble_w, msg_h), border_radius=10)
+                    pygame.draw.rect(self.screen, Theme.ACCENT2, 
+                                   (bubble_x, y + 4, 3, msg_h - 8), border_radius=2)
+                    
+                    ly = y + msg_padding
+                    for line in wrapped_lines:
+                        if line:
+                            self.screen.blit(self.font_sm.render(line, True, Theme.WHITE), 
+                                           (bubble_x + 12, ly))
+                        ly += line_h
+        else:
+            # Empty state
+            center_x = px + pw // 2
+            center_y = msg_y_start + msg_area_h // 2
+            
+            pulse = abs(math.sin(self.frame * 0.04)) * 50
+            
+            lines = [
+                ("Type a question about the match", True),
+                ("Press C anytime for instant death coaching", False),
+                ("Ask about strategy, positioning, rotations", False),
+            ]
+            
+            for i, (tip_text, highlight) in enumerate(lines):
+                color = (int(140 + pulse), int(160 + pulse), int(200 + pulse)) if highlight else Theme.MUTED
+                txt = self.font_sm.render(tip_text, True, color)
+                self.screen.blit(txt, (center_x - txt.get_width() // 2, center_y - 30 + i * 24))
+        
+        self.screen.set_clip(None)
+        
+        # Waiting indicator (above input)
+        if self.chat_waiting:
+            dots = "." * ((self.frame // 12) % 4)
+            wait = self.font_sm.render(f"Thinking{dots}", True, Theme.ACCENT2)
+            self.screen.blit(wait, (px + 14, input_y - 20))
     
     def _poll_ai_responses(self):
         """Clean expired insights."""
-        # Clean expired insights
         if self.ai_coach and self.all_ticks:
             tick = self.all_ticks[self.tick_idx]
             self.ai_insights = [(t, txt, exp) for t, txt, exp in self.ai_insights if exp > tick]
     
     def _trigger_ai_analysis(self, analysis):
         """Trigger AI analysis for a death."""
-        # Auto-analysis disabled in favor of manual 'C' key to save resources
         pass
 
 
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='SACRILEGE RADAR - CS2 Demo Viewer')
-    parser.add_argument('demo', nargs='?', help='Demo file path')
+    parser.add_argument('demo', nargs='?', help='Demo file path (optional - use file dialog if omitted)')
+    parser.add_argument('--no-welcome', action='store_true', help='Skip welcome screen, auto-load first demo')
     args = parser.parse_args()
     
     replayer = RadarReplayer(1500, 920)
     
     if args.demo:
         replayer.load_demo(Path(args.demo))
-    # If no argument, show welcome screen (don't auto-load)
+    elif args.no_welcome:
+        demo_dir = Path(__file__).parent.parent / 'demo files'
+        if demo_dir.exists():
+            demos = list(demo_dir.glob('*.dem'))
+            if demos:
+                replayer.load_demo(demos[0])
+    # else: show welcome screen with file dialog button
     
     replayer.run()
 
